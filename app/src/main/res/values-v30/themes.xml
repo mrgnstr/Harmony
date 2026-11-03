@@ -1,0 +1,12 @@
+<resources>
+    <!-- Draw into the cutout on every edge, landscape included (no black bar beside the hole punch); the content keeps clear of
+         it through the insets. Set in the theme, so the window has it from the start rather than once Compose runs. -->
+    <style name="Theme.Harmony.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#000000</item>
+        <item name="postSplashScreenTheme">@style/Theme.Harmony</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+    <style name="Theme.Harmony" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+</resources>

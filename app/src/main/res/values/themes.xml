@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Harmony.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#000000</item>
+        <item name="postSplashScreenTheme">@style/Theme.Harmony</item>
+    </style>
+    <style name="Theme.Harmony" parent="android:Theme.Material.NoActionBar" />
+</resources>

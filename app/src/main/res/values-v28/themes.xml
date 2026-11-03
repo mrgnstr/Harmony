@@ -1,0 +1,11 @@
+<resources>
+    <!-- Draw into the cutout on the short edges (portrait status bar); the content keeps clear of it through the insets. -->
+    <style name="Theme.Harmony.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#000000</item>
+        <item name="postSplashScreenTheme">@style/Theme.Harmony</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+    <style name="Theme.Harmony" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>
