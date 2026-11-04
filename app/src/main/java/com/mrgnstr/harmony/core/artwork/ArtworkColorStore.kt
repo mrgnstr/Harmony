@@ -22,6 +22,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
+/** [dominant] is the most common colour (ARGB), [bottomLuminance] the mean brightness (0..1) of the picture's bottom edge. */
+class CoverSample(val dominant: Int?, val bottomLuminance: Float)
+
 /** Palette extraction happens here, once per album, never while scrolling. Results live in Room. */
 @Singleton
 class ArtworkColorStore @Inject constructor(
@@ -85,6 +88,24 @@ class ArtworkColorStore @Inject constructor(
             else -> null
         } ?: return@withContext null
         extract(0, bitmap).primary
+    }
+
+    /**
+     * What Now Playing's controls need to know about a cover, from a few 64px pixels (cheap, so not stored): the colour that
+     * covers the most of it (not the most vivid one) and how bright its bottom edge is, which is what the blurred area behind
+     * the controls is made of. Null without art.
+     */
+    suspend fun coverSample(songId: Long, albumId: Long): CoverSample? = withContext(Dispatchers.Default) {
+        val bitmap = ArtworkDecoder.decode(context, songId, albumId, SAMPLE_PX) ?: return@withContext null
+        val source = if (bitmap.hasAlpha()) opaquePixelsOf(bitmap) ?: bitmap else bitmap
+        val dominant = Palette.from(source).maximumColorCount(16).generate().dominantSwatch?.rgb?.or(OPAQUE)
+        // Mean brightness (0..1, sRGB weights) of the bottom twelfth of the picture.
+        val rows = (bitmap.height / 12).coerceAtLeast(1)
+        val px = IntArray(bitmap.width * rows)
+        bitmap.getPixels(px, 0, bitmap.width, 0, bitmap.height - rows, bitmap.width, rows)
+        var sum = 0f
+        for (c in px) sum += (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)) / 255f
+        CoverSample(dominant, sum / px.size)
     }
 
     private fun decodeFile(path: String): Bitmap? {

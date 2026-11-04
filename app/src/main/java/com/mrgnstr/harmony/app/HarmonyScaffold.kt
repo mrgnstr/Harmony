@@ -17,6 +17,13 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mrgnstr.harmony.feature.nowplaying.MiniPlayerGap
+import com.mrgnstr.harmony.feature.nowplaying.MiniPlayerHeight
+import com.mrgnstr.harmony.feature.nowplaying.NowPlayingViewModel
+import com.mrgnstr.harmony.feature.nowplaying.PlayerSheet
+import com.mrgnstr.harmony.feature.nowplaying.rememberPlayerSheetState
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -116,7 +123,12 @@ private fun Shell(nav: TabNavigator) {
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
     val blur = rememberChromeBlurState()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomInset = navBottom + AppBarEdgeGap + AppBarHeight
+    val barTop = navBottom + AppBarEdgeGap + AppBarHeight
+    val player = hiltViewModel<NowPlayingViewModel>()
+    val hasMedia by player.snapshot.collectAsStateWithLifecycle().let { st -> androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { st.value.hasMedia } } }
+    val sheet = rememberPlayerSheetState()
+    // Pages pad for the tab bar and, with a song loaded, the mini player resting above it.
+    val bottomInset = if (hasMedia) barTop + MiniPlayerGap + MiniPlayerHeight else barTop
 
     val entries = remember(nav) {
         val openSettings = { nav.push(Dest.Settings); Unit }
@@ -173,8 +185,11 @@ private fun Shell(nav: TabNavigator) {
                         current = nav.current,
                         onSelect = nav::select,
                         blur = blur,
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap),
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
+                            // The open player slides the bar off the bottom.
+                            .graphicsLayer { translationY = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx() },
                     )
+                    PlayerSheet(sheet, restingBottom = barTop + MiniPlayerGap, blur = blur)
                 }
             }
         }

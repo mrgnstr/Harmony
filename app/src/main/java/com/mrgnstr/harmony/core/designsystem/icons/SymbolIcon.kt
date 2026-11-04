@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
@@ -132,6 +133,7 @@ private object GlyphStore {
 /**
  * A Material Symbol at [size], drawn from its outline (not from a font, so no system font replacement can touch it).
  * [fill] 0 = outline … 1 = filled and [weight] 100…700 interpolate the font's own masters on every API level.
+ * [blendMode] [BlendMode.Clear] cuts the glyph out of what is behind it (the parent must be an offscreen layer).
  */
 @Composable
 fun SymbolIcon(
@@ -142,10 +144,11 @@ fun SymbolIcon(
     tint: Color = LocalContentColor.current,
     fill: Float = 0f,
     weight: Int = 400,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     val fillState = rememberUpdatedState(fill)
     val weightState = rememberUpdatedState(weight.toFloat())
-    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fillState, weightState)
+    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fillState, weightState, blendMode)
 }
 
 /** [SymbolIcon] whose fill springs between outline and filled when [filled] changes (redraws only, no recomposition). */
@@ -158,10 +161,11 @@ fun AnimatedSymbolIcon(
     size: Dp = 24.dp,
     tint: Color = LocalContentColor.current,
     weight: Int = 400,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     val fill = animateFloatAsState(if (filled) 1f else 0f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "fill")
     val weightState = animateFloatAsState(weight.toFloat(), MaterialTheme.motionScheme.fastEffectsSpec(), label = "weight")
-    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fill, weightState)
+    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fill, weightState, blendMode)
 }
 
 @Composable
@@ -173,6 +177,7 @@ private fun SymbolCanvas(
     tint: Color,
     fill: State<Float>,
     weight: State<Float>,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     val glyph = GlyphStore.get(LocalContext.current)[symbol.char.code]
     val tintState = rememberUpdatedState(tint)
@@ -185,7 +190,7 @@ private fun SymbolCanvas(
             onDrawBehind {
                 if (glyph == null) return@onDrawBehind
                 glyph.outline(path, fill.value, weight.value, this.size.minDimension)
-                drawPath(path, tintState.value)
+                drawPath(path, tintState.value, blendMode = blendMode)
             }
         },
     )
