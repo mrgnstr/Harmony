@@ -14,4 +14,4 @@ data class PlayCountEntity(
     val lastPlayedMs: Long,
 )
 
-data class PlayCount(val songId: Long, val count: Int)
+data class PlayCount(val songId: Long, val count: Int, val lastPlayedMs: Long = 0L)

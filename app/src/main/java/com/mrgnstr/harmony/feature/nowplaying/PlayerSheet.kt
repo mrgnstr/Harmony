@@ -82,6 +82,7 @@ import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.device.VisualTier
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
@@ -95,6 +96,10 @@ private val MiniArtRadius = 8.dp
 private val MiniArtInset = 14.dp
 /** Release speed in dp/s that throws the mini player away (as tuned in the old app: 2000 px/s on the 11T, without being harder on lower densities). */
 private val DismissFling = 725.dp
+private const val CoverArcBend = 1.6f
+private const val CoverCenterBend = 2f
+private fun coverRise(p: Float) = p.pow(CoverArcBend)
+private fun coverCenter(p: Float) = 1f - (1f - p).pow(CoverCenterBend)
 
 /** A rounded rect at fixed coordinates: the sheet's clip, rebuilt per frame without any relayout. */
 private class RectShape(private val rect: RoundRect) : Shape {
@@ -236,6 +241,14 @@ fun PlayerSheet(
             }
         }
 
+        // The cover's place at sheet progress p: not a straight line. Its centre heads for the screen's horizontal centre early and
+        // rises late, so it reaches the middle before it fills the screen (rising early would push it above the sheet's top, which
+        // rises linearly, and clip it). Its height is the centre's share of the way to the open cover, which dips below the start
+        // before rising because the cover grows downward faster than its top rises.
+        val coverSize: (Float) -> Float = { p -> lerp(miniArt, fullArt, p) }
+        val coverLeft: (Float) -> Float = { p -> lerp(miniArtX + miniArt / 2f, fullArt / 2f, coverCenter(p)) - coverSize(p) / 2f }
+        val coverTop: (Float) -> Float = { p -> lerp(miniArtY, fullArtY, coverRise(p)) }
+
         // The expanding object is the mini player's own blurred pill, resized every frame to the full screen with corners that
         // morph into the display's. It never fades: the scene (cover, blur, controls) grows over it and hides it at the end.
         if (showGlass) {
@@ -262,8 +275,8 @@ fun PlayerSheet(
             val s = lerp(miniArt / fullArt, 1f, p)
             transformOrigin = TransformOrigin(0f, fullArtY / screenH)
             scaleX = s; scaleY = s
-            translationX = lerp(miniArtX, 0f, p)
-            translationY = lerp(miniArtY, fullArtY, p) - fullArtY + sag()
+            translationX = coverLeft(p)
+            translationY = coverTop(p) - fullArtY + sag()
             // The cover's small radius at rest; open, the display's own radius at each corner (divided by the scale: the layer is scaled).
             val rest = MiniArtRadius.toPx()
             fun r(display: Float) = CornerRadius(lerp(rest, display, p) * cornerKeep.value / s)
@@ -367,8 +380,8 @@ fun PlayerSheet(
                         val s = lerp(miniArt / fullArt, 1f, p)
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = s; scaleY = s
-                        translationX = lerp(miniArtX, 0f, p)
-                        translationY = lerp(miniArtY, fullArtY, p) + sag()
+                        translationX = coverLeft(p)
+                        translationY = coverTop(p) + sag()
                         // The radius is set in the layer's own (unscaled) space, so divide the on-screen one by the scale.
                         val radius = lerp(MiniArtRadius.toPx(), 0f, p) / s
                         shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))

@@ -1,6 +1,7 @@
 package com.mrgnstr.harmony.core.designsystem.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -73,13 +74,14 @@ fun ArtworkTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     circular: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     artwork: @Composable (Modifier) -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     Column(
         modifier
             .pressResponse(interaction, pressedScale = 0.95f)
-            .clickable(interaction, indication = null, onClick = onClick),
+            .combinedClickable(interaction, indication = null, onLongClick = onLongClick, onClick = onClick),
         horizontalAlignment = if (circular) Alignment.CenterHorizontally else Alignment.Start,
     ) {
         artwork(Modifier.fillMaxWidth().aspectRatio(1f).clip(if (circular) CircleShape else TileCoverShape))

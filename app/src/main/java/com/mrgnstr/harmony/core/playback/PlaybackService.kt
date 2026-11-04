@@ -2,7 +2,6 @@ package com.mrgnstr.harmony.core.playback
 
 import android.app.PendingIntent
 import android.content.Intent
-import com.mrgnstr.harmony.app.MainActivity
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -66,7 +65,8 @@ class PlaybackService : MediaSessionService() {
         // Tapping the notification (or lock-screen player) opens Now Playing.
         val open = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            // The launcher activity, found by package so core never names the app layer.
+            packageManager.getLaunchIntentForPackage(packageName)!!.putExtra(EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).setSessionActivity(open).build()
@@ -180,3 +180,6 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 }
+
+/** Extra on the intent that the notification and lock-screen player launch the app with: open Now Playing. */
+const val EXTRA_OPEN_PLAYER = "open_player"

@@ -24,6 +24,7 @@ import com.mrgnstr.harmony.core.designsystem.theme.SchemeFactory
 import com.mrgnstr.harmony.core.device.DeviceCapabilities
 import com.mrgnstr.harmony.core.model.BlurMode
 import com.mrgnstr.harmony.core.model.ThemeMode
+import com.mrgnstr.harmony.core.playback.EXTRA_OPEN_PLAYER
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -67,10 +68,6 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true) openPlayer++
-    }
-
-    companion object {
-        const val EXTRA_OPEN_PLAYER = "open_player"
     }
 }
 

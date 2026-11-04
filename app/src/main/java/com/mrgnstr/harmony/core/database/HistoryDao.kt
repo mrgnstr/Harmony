@@ -29,7 +29,7 @@ abstract class HistoryDao {
         prune(keep)
     }
 
-    @Query("SELECT songId, count FROM play_counts")
+    @Query("SELECT songId, count, lastPlayedMs FROM play_counts")
     abstract fun observePlayCounts(): Flow<List<PlayCount>>
 
     /** The latest [limit] plays, newest first, joined with their index rows (songs missing from the index drop out). */

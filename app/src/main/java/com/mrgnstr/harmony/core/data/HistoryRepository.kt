@@ -1,6 +1,7 @@
 package com.mrgnstr.harmony.core.data
 
 import com.mrgnstr.harmony.core.database.HistoryDao
+import com.mrgnstr.harmony.core.database.PlayCount
 import com.mrgnstr.harmony.core.database.toModel
 import com.mrgnstr.harmony.core.model.Song
 import javax.inject.Inject
@@ -23,6 +24,11 @@ class HistoryRepository @Inject constructor(private val dao: HistoryDao) {
     /** Lifetime plays per song id. */
     val playCounts: Flow<Map<Long, Int>> = dao.observePlayCounts()
         .map { rows -> rows.associate { it.songId to it.count } }
+        .flowOn(Dispatchers.Default)
+
+    /** Lifetime plays and the time of the latest one, per song id. */
+    val playStats: Flow<Map<Long, PlayCount>> = dao.observePlayCounts()
+        .map { rows -> rows.associateBy { it.songId } }
         .flowOn(Dispatchers.Default)
 
     suspend fun remove(id: Long) = dao.delete(id)

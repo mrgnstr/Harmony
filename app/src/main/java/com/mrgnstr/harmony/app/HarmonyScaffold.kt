@@ -143,7 +143,11 @@ private fun Shell(nav: TabNavigator, openPlayer: Int) {
             entry<Dest.Root> { root ->
                 when (root.tab) {
                     Tab.Home -> HomeRoute(onOpenSettings = openSettings, onOpenGallery = openGallery)
-                    Tab.Library -> LibraryRoute(onOpenSettings = openSettings, onOpenGallery = openGallery)
+                    Tab.Library -> LibraryRoute(
+                        onOpenSettings = openSettings, onOpenGallery = openGallery,
+                        onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }, onOpenArtist = { nav.push(Dest.Artist(it.name)) },
+                        onOpenPlaylist = { nav.push(Dest.Playlist(it)) }, onOpenGenre = { nav.push(Dest.Genre(it)) },
+                    )
                     Tab.Search -> SearchRoute()
                 }
             }

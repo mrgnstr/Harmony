@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mrgnstr.harmony.core.model.LibraryFilters
+import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.BlurMode
 import com.mrgnstr.harmony.core.model.ThemeMode
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -52,6 +53,15 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     val systemBarFade: Flow<Boolean> = context.settingsDataStore.data.map { it[systemBarFadeKey] ?: true }
 
     suspend fun setSystemBarFade(on: Boolean) { context.settingsDataStore.edit { it[systemBarFadeKey] = on } }
+
+    private fun sortKey(tab: String) = stringPreferencesKey("sort_$tab")
+
+    /** The saved ordering of each library tab, by tab name; tabs never sorted are missing. */
+    val librarySorts: Flow<Map<String, LibrarySort>> = context.settingsDataStore.data.map { prefs ->
+        buildMap { for ((key, value) in prefs.asMap()) if (key.name.startsWith("sort_")) LibrarySort.decode(value as? String)?.let { put(key.name.removePrefix("sort_"), it) } }
+    }
+
+    suspend fun setLibrarySort(tab: String, sort: LibrarySort) { context.settingsDataStore.edit { it[sortKey(tab)] = sort.encode() } }
 
     private val minimumDurationKey = longPreferencesKey("minimum_duration_ms")
     private val excludedFoldersKey = stringSetPreferencesKey("excluded_folders")
