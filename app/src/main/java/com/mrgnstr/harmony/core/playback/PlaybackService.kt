@@ -1,5 +1,8 @@
 package com.mrgnstr.harmony.core.playback
 
+import android.app.PendingIntent
+import android.content.Intent
+import com.mrgnstr.harmony.app.MainActivity
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -60,7 +63,13 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
-        session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).build()
+        // Tapping the notification (or lock-screen player) opens Now Playing.
+        val open = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).setSessionActivity(open).build()
         history = HistoryRecorder(player, historyDao, appScope)
         val persister = QueuePersister(player, queueStore, queueDao, appScope).also { persister = it }
         // Back to where playback stopped, paused. Saving only starts afterwards, so the empty player cannot overwrite the queue.

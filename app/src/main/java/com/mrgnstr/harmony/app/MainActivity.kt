@@ -1,6 +1,7 @@
 package com.mrgnstr.harmony.app
 
 import android.graphics.Color as AndroidColor
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,6 +12,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,10 +37,13 @@ class MainActivity : ComponentActivity() {
     private var themeMode by mutableStateOf<ThemeMode?>(null)
     private var chromeBlur by mutableStateOf<BlurMode?>(null)
     private var coverBlur by mutableStateOf<BlurMode?>(null)
+    /** Bumped each time the notification asks for Now Playing. */
+    private var openPlayer by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition { themeMode == null || chromeBlur == null || coverBlur == null }
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) handle(intent)
         lifecycleScope.launch { settings.themeMode.collect { themeMode = it } }
         lifecycleScope.launch { settings.glassBlur.collect { chromeBlur = it } }
         lifecycleScope.launch { settings.coverBlur.collect { coverBlur = it } }
@@ -51,8 +56,21 @@ class MainActivity : ComponentActivity() {
             SystemBars(dark)
             val context = LocalContext.current
             val schemes = remember(context) { SchemeFactory(context) }
-            HarmonyApp(dark, capabilities.tier, chromeBlur ?: BlurMode.Auto, coverBlur ?: BlurMode.Auto, schemes)
+            HarmonyApp(dark, capabilities.tier, chromeBlur ?: BlurMode.Auto, coverBlur ?: BlurMode.Auto, schemes, openPlayer)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
+    private fun handle(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_PLAYER, false) == true) openPlayer++
+    }
+
+    companion object {
+        const val EXTRA_OPEN_PLAYER = "open_player"
     }
 }
 

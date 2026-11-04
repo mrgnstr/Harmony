@@ -125,15 +125,29 @@ private class MorphingShape(radii: FloatArray) : Shape {
     }
 }
 
-/**
- * The big play/pause button: a circle while paused, the cookie while playing, and a rounded square while held. The change
- * between them is a slow spring that blends from whatever shape is showing. The glyph is cut out of the white container (an
- * offscreen layer lets it clear the container), so the cover shows through, and it morphs between play and pause.
- */
+/** Now Playing's big play/pause button, in the cover's colours; the glyph is cut out so the cover shows through. */
 @Composable
 fun PlayButton(playing: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalCoverColors.current
-    val interaction = remember { MutableInteractionSource() }
+    MorphingPlayButton(playing, onToggle, 96.dp, 44.dp, c.accent, c.onAccent, cutOut = true, modifier = modifier)
+}
+
+/**
+ * A play/pause button: a circle while paused, the cookie while playing, and a rounded square while held. The change
+ * between them is a slow spring that blends from whatever shape is showing. With [cutOut] the glyph is cut out of the container
+ * (an offscreen layer lets it clear the container), so what is behind shows through; it morphs between play and pause.
+ */
+@Composable
+fun MorphingPlayButton(
+    playing: Boolean,
+    onToggle: () -> Unit,
+    size: Dp,
+    glyph: Dp,
+    containerColor: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+    cutOut: Boolean = false,
+) {    val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val target = when {
         pressed -> SquareProfile
@@ -160,17 +174,17 @@ fun PlayButton(playing: Boolean, onToggle: () -> Unit, modifier: Modifier = Modi
         // The container is a plain rectangle; the layer below clips it to the morphing shape (which also clips the ripple and the touches).
         shape = RectangleShape,
         colors = IconButtonDefaults.filledIconToggleButtonColors(
-            containerColor = c.accent, contentColor = c.onAccent, checkedContainerColor = c.accent, checkedContentColor = c.onAccent,
+            containerColor = containerColor, contentColor = contentColor, checkedContainerColor = containerColor, checkedContentColor = contentColor,
         ),
         interactionSource = interaction,
-        modifier = modifier.size(96.dp).graphicsLayer {
+        modifier = modifier.size(size).graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
             val t = blend.value
             for (k in shown.indices) shown[k] = max(0f, from[k] + (to[k] - from[k]) * t)
             shape = MorphingShape(shown)
             clip = true
         },
-    ) { PlayPauseIcon(playing, 44.dp, blendMode = BlendMode.Clear) }
+    ) { PlayPauseIcon(playing, glyph, blendMode = if (cutOut) BlendMode.Clear else BlendMode.SrcOver) }
 }
 
 /**

@@ -5,6 +5,9 @@ import android.view.RoundedCorner
 import android.view.View
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -35,7 +38,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +83,7 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.device.VisualTier
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 
 val MiniPlayerHeight = 64.dp
@@ -84,6 +93,8 @@ private val MiniArt = 44.dp
 private val MiniArtRadius = 8.dp
 /** Left gap of the thumbnail: larger than the vertical one so its corners clear the pill's curve. */
 private val MiniArtInset = 14.dp
+/** Release speed in dp/s that throws the mini player away (as tuned in the old app: 2000 px/s on the 11T, without being harder on lower densities). */
+private val DismissFling = 725.dp
 
 /** A rounded rect at fixed coordinates: the sheet's clip, rebuilt per frame without any relayout. */
 private class RectShape(private val rect: RoundRect) : Shape {
@@ -92,10 +103,13 @@ private class RectShape(private val rect: RoundRect) : Shape {
 
 /** The display's four corner radii in px (top-left, top-right, bottom-right, bottom-left); all 0 where the system reports none (before Android 12). */
 private class ScreenCorners(val tl: Float, val tr: Float, val br: Float, val bl: Float) {
-    /** The sheet's corners at [t] of the way from the fully round mini pill ([miniH] tall) to the display's own, capped to fit [rect]. */
-    fun morph(miniH: Float, t: Float, left: Float, top: Float, right: Float, bottom: Float): RoundRect {
+    /**
+     * The sheet's corners at [t] of the way from the fully round mini pill ([miniH] tall) to the display's own, capped to fit the
+     * rect. [keep] scales the result (1 = as is, 0 = square).
+     */
+    fun morph(miniH: Float, t: Float, left: Float, top: Float, right: Float, bottom: Float, keep: Float = 1f): RoundRect {
         val cap = minOf(right - left, bottom - top) / 2f
-        fun r(corner: Float) = CornerRadius(lerp(miniH / 2f, corner, t).coerceIn(0f, cap))
+        fun r(corner: Float) = CornerRadius((lerp(miniH / 2f, corner, t) * keep).coerceIn(0f, cap))
         return RoundRect(left, top, right, bottom, r(tl), r(tr), r(br), r(bl))
     }
 
@@ -137,14 +151,30 @@ fun PlayerSheet(
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
     val snap by viewModel.snapshot.collectAsStateWithLifecycle()
+    var hasAppeared by rememberSaveable { mutableStateOf(false) }
+    // Swiped away and cleared: re-arm the entrance for the next queue, not for a song change or rotation.
+    LaunchedEffect(snap.hasMedia) {
+        if (!snap.hasMedia) {
+            hasAppeared = false
+            state.finishSwipeAway()
+        }
+    }
     if (!snap.hasMedia) return
     val songId = snap.songId ?: return
+    val entrance = remember { Animatable(if (hasAppeared || state.isExpanded) 0f else 1f) }
+    LaunchedEffect(entrance) {
+        hasAppeared = true
+        if (entrance.value > 0f) entrance.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
+    }
     val coverColors = animateCoverColors(viewModel.coverColors.collectAsStateWithLifecycle().value)
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val lowTier = LocalVisualTier.current == VisualTier.LOW
     val fade: (Float) -> Float = { x -> if (lowTier) (if (x >= 0.5f) 1f else 0f) else x.coerceIn(0f, 1f) }
     val clamped: () -> Float = { state.visual.coerceIn(0f, 1f) }
+    // Whether the current drag began with the mini player resting.
+    val fromRest = remember { mutableStateOf(false) }
+    StatusBarIconsFollowCover(state, coverColors)
 
     // Back closes the player; the gesture scrubs the morph and lets go with its own spring.
     PredictiveBackHandler(enabled = state.isExpanded) { events ->
@@ -185,11 +215,26 @@ fun PlayerSheet(
         val showMini by remember { derivedStateOf { state.progress.value < 0.99f } }
         val showGlass by remember { derivedStateOf { state.progress.value < 1f } }
         val travel = restingTop
+        // Swiped away, the pill is thrown down the gap to the tab bar (where it touches it and starts pushing it) and then its own
+        // height further, fading over that last stretch; that travel is where it is gone.
+        val gapPx = with(density) { MiniPlayerGap.toPx() }
+        val swipeDistance = miniH + gapPx
+        // The entrance retraces the dismissal's translation and fade, with fixed timing and no tab-bar push.
+        val swipeOffset: () -> Float = { state.swipeAway.value + entrance.value * swipeDistance }
+        val swipeAlpha: () -> Float = { fade(1f - ((swipeOffset() - gapPx) / miniH).coerceIn(0f, 1f)) }
         // The open player ends with the display's own corner radii (Android 12+; square where the system reports none).
         val view = LocalView.current
         val corners = remember(screenW, screenH) { ScreenCorners.of(view) }
         // The spring may dip below 0 (the pill sags past its resting place); everything drawn follows it down by this much.
-        val sag: () -> Float = { (-state.visual).coerceAtLeast(0f) * travel }
+        val sag: () -> Float = { (-state.visual).coerceAtLeast(0f) * travel + swipeOffset() }
+        // The display's radius only shapes the motion. Once the player has opened and stopped it eases to square, so a device that
+        // misreports its corners never keeps a wrong radius; it comes straight back as soon as the sheet moves.
+        val cornerKeep = remember { Animatable(1f) }
+        LaunchedEffect(state) {
+            snapshotFlow { state.progress.value >= 1f && !state.progress.isRunning }.collect { settled ->
+                if (settled) cornerKeep.animateTo(0f, tween(300)) else cornerKeep.snapTo(1f)
+            }
+        }
 
         // The expanding object is the mini player's own blurred pill, resized every frame to the full screen with corners that
         // morph into the display's. It never fades: the scene (cover, blur, controls) grows over it and hides it at the end.
@@ -197,7 +242,7 @@ fun PlayerSheet(
             ChromeSurface(
                 state = blur,
                 shape = remember(miniH, screenH, corners) { MorphingPillShape(miniH, screenH, corners) },
-                modifier = Modifier.layout { measurable, incoming ->
+                modifier = Modifier.graphicsLayer { alpha = swipeAlpha() }.layout { measurable, incoming ->
                     val p = clamped()
                     val w = lerp(miniW, screenW, p).roundToInt().coerceAtLeast(0)
                     val h = lerp(miniH, screenH, p).roundToInt().coerceAtLeast(0)
@@ -221,7 +266,7 @@ fun PlayerSheet(
             translationY = lerp(miniArtY, fullArtY, p) - fullArtY + sag()
             // The cover's small radius at rest; open, the display's own radius at each corner (divided by the scale: the layer is scaled).
             val rest = MiniArtRadius.toPx()
-            fun r(display: Float) = CornerRadius(lerp(rest, display, p) / s)
+            fun r(display: Float) = CornerRadius(lerp(rest, display, p) * cornerKeep.value / s)
             shape = RectShape(
                 RoundRect(
                     left = 0f, top = fullArtY * (1f - p),
@@ -233,7 +278,11 @@ fun PlayerSheet(
             clip = true
         }
 
-        val drag = rememberDraggableState { delta -> scope.launch { state.dragBy(delta, travel) } }
+        val drag = rememberDraggableState { delta ->
+            // Having pulled the player up at any point in this drag rules the swipe-away out, however it ends.
+            if (state.progress.value > 0.02f) fromRest.value = false
+            if (!state.swipingAway) scope.launch(start = CoroutineStart.UNDISPATCHED) { state.dragBy(delta, travel) }
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -244,11 +293,29 @@ fun PlayerSheet(
                         miniH, p,
                         left = lerp(margin, 0f, p), top = lerp(restingTop, 0f, p) + dy,
                         right = lerp(margin + miniW, screenW, p), bottom = lerp(restingTop + miniH, screenH, p) + dy,
+                        keep = cornerKeep.value,
                     )
-                    shape = RectShape(rect)
+                    // Once faded out, an empty clip: nothing drawn, and the pill lying over the tab bar takes no touches.
+                    shape = if (state.swipeGone) RectShape(RoundRect(0f, 0f, 0f, 0f, CornerRadius.Zero)) else RectShape(rect)
+                    // Thrown down, it only starts to fade where it touches the tab bar, and is gone one pill height later.
+                    alpha = swipeAlpha()
                     clip = true
                 }
-                .draggable(drag, Orientation.Vertical, onDragStopped = { state.settle(it, travel) })
+                .draggable(
+                    drag, Orientation.Vertical,
+                    onDragStarted = { fromRest.value = state.isResting },
+                    onDragStopped = { v ->
+                        when {
+                            state.swipingAway -> Unit
+                            // Only a drag that began with the mini player at rest and only ever went down (not one pulled down from
+                            // Now Playing, mid-morph, or after first being pulled up), and fast enough: it is thrown away and the
+                            // queue is cleared.
+                            fromRest.value && v > with(density) { DismissFling.toPx() } && state.progress.value <= 0.02f ->
+                                state.swipeAway(v, gapPx, swipeDistance, onGone = viewModel::clearAll)
+                            else -> state.settle(v, travel)
+                        }
+                    },
+                )
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !state.isExpanded) { state.expand() },
         ) {
 
@@ -270,9 +337,10 @@ fun PlayerSheet(
                         Text(snap.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(snap.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    FilledTonalIconButton(onClick = viewModel::togglePlayPause, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(48.dp)) {
-                        PlayPauseIcon(snap.isPlaying, 24.dp)
-                    }
+                    MorphingPlayButton(
+                        snap.isPlaying, viewModel::togglePlayPause, size = 48.dp, glyph = 24.dp,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                     val nextKick = rememberSkipKick(next = true, reach = 6.dp)
                     androidx.compose.material3.IconButton(onClick = { nextKick.kick(); viewModel.next() }, enabled = snap.hasNext) {
                         SkipIcon(Symbols.SkipNext, "Next", nextKick)
@@ -354,6 +422,23 @@ fun PlayerSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The status bar's icons follow what is under them: the cover (or its blur) while Now Playing is open, the theme otherwise.
+ */
+@Composable
+private fun StatusBarIconsFollowCover(state: PlayerSheetState, colors: CoverColors) {
+    val view = LocalView.current
+    val themeDark = MaterialTheme.colorScheme.background.red < 0.5f
+    val coverIsLight = colors.lightTop
+    LaunchedEffect(coverIsLight, themeDark) {
+        val window = (view.context as? android.app.Activity)?.window ?: return@LaunchedEffect
+        val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)
+        snapshotFlow { state.progress.value > 0.5f }.collect { open ->
+            controller.isAppearanceLightStatusBars = if (open) coverIsLight else !themeDark
         }
     }
 }

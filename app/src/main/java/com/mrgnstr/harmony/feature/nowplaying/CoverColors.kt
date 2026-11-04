@@ -26,6 +26,8 @@ class CoverColors(
     val tonal: Color,
     /** How much black goes under the controls (0 on a bright cover, whose controls are dark instead). */
     val scrim: Float,
+    /** The cover's top edge is bright (what the status bar sits on): the status bar icons turn dark. */
+    val lightTop: Boolean = false,
 )
 
 val DefaultCoverColors = CoverColors(
@@ -38,6 +40,9 @@ val LocalCoverColors = compositionLocalOf { DefaultCoverColors }
 /** Above this brightness of the cover's bottom edge the controls turn dark instead of light. */
 private const val BrightCover = 0.58f
 
+/** Above this brightness of the cover's top edge the status bar icons turn dark. */
+private const val BrightTop = 0.55f
+
 /**
  * The colours for a cover whose most common colour is [dominant] (ARGB, null if none) and whose bottom edge, the stuff the blurred
  * area behind the controls is made of, has mean brightness [bottomLuminance] (0..1).
@@ -46,23 +51,24 @@ private const val BrightCover = 0.58f
  *   blur is dark enough for them.
  * A cover whose most common colour is grey, black or white keeps plain white (or plain black on a bright one).
  */
-fun coverColorsOf(dominant: Int?, bottomLuminance: Float): CoverColors {
+fun coverColorsOf(dominant: Int?, bottomLuminance: Float, topLuminance: Float = 0f): CoverColors {
     val base = dominant?.let { Hct.fromInt(it) }
     val coloured = base != null && base.chroma >= 6.0
     val hue = base?.hue ?: 0.0
     val chroma = (base?.chroma ?: 0.0).coerceIn(20.0, 48.0)
     fun tint(c: Double, tone: Double) = Color(Hct.from(hue, if (coloured) c else 0.0, tone).toInt())
+    val lightTop = topLuminance > BrightTop
     return if (bottomLuminance >= BrightCover) {
         CoverColors(
             accent = tint(chroma, 22.0), onAccent = tint(20.0, 96.0), text = tint(10.0, 10.0),
-            textSoft = tint(24.0, 28.0).copy(alpha = 0.85f), tonal = tint(chroma, 30.0).copy(alpha = 0.18f), scrim = 0f,
+            textSoft = tint(24.0, 28.0).copy(alpha = 0.85f), tonal = tint(chroma, 30.0).copy(alpha = 0.18f), scrim = 0f, lightTop = lightTop,
         )
     } else {
         // Darken enough that the blur ends up around 30% bright, within a sensible range.
         val scrim = (1f - 0.30f / bottomLuminance.coerceAtLeast(0.01f)).coerceIn(0.3f, 0.5f)
         CoverColors(
             accent = tint(chroma, 86.0), onAccent = tint(30.0, 12.0), text = tint(6.0, 97.0),
-            textSoft = tint(18.0, 88.0).copy(alpha = 0.8f), tonal = tint(chroma, 82.0).copy(alpha = 0.26f), scrim = scrim,
+            textSoft = tint(18.0, 88.0).copy(alpha = 0.8f), tonal = tint(chroma, 82.0).copy(alpha = 0.26f), scrim = scrim, lightTop = lightTop,
         )
     }
 }
@@ -78,5 +84,6 @@ fun animateCoverColors(target: CoverColors): CoverColors {
         textSoft = animateColorAsState(target.textSoft, spec, label = "text-soft").value,
         tonal = animateColorAsState(target.tonal, spec, label = "tonal").value,
         scrim = animateFloatAsState(target.scrim, tween(500), label = "scrim").value,
+        lightTop = target.lightTop,
     )
 }

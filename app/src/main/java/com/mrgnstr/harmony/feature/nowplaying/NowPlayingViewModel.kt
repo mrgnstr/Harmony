@@ -49,7 +49,7 @@ class NowPlayingViewModel @Inject constructor(
         .distinctUntilChanged { a, b -> a.second == b.second && a.second > 0 }
         .mapLatest { (songId, albumId) ->
             if (songId == 0L) DefaultCoverColors
-            else colorStore.coverSample(songId, albumId)?.let { coverColorsOf(it.dominant, it.bottomLuminance) } ?: DefaultCoverColors
+            else colorStore.coverSample(songId, albumId)?.let { coverColorsOf(it.dominant, it.bottomLuminance, it.topLuminance) } ?: DefaultCoverColors
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultCoverColors)
 
@@ -58,6 +58,8 @@ class NowPlayingViewModel @Inject constructor(
     /** The pre-blurred strips around the cover (where the live shader is off); computed off the main thread and cached. */
     suspend fun coverStrips(spec: CoverStripSpec): CoverStrips? = stripCache.get(spec)
 
+    /** The mini player was swiped away: stops and empties the queue. */
+    fun clearAll() = player.clearAll()
     fun togglePlayPause() = player.togglePlayPause()
     fun next() = player.skipToNext()
     fun previous() = player.skipToPrevious()

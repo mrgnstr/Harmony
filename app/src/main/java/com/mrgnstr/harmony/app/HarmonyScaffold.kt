@@ -36,6 +36,8 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,7 +85,7 @@ private const val TabMetadata = "harmony.tab"
  * while a back gesture is in progress), then lays out the pages with the floating bar over them.
  */
 @Composable
-fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur: BlurMode, schemes: SchemeFactory) {
+fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur: BlurMode, schemes: SchemeFactory, openPlayer: Int = 0) {
     val nav = rememberTabNavigator()
     val registry = rememberColorSourceRegistry()
     val back by rememberBackProgress()
@@ -98,7 +100,7 @@ fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur:
     HarmonyTheme(scheme, tier, chromeBlur, coverBlur) {
         CompositionLocalProvider(LocalColorSourceRegistry provides registry) {
             val permission = rememberAudioPermissionState()
-            if (permission.granted) Shell(nav) else OnboardingScreen(permission)
+            if (permission.granted) Shell(nav, openPlayer) else OnboardingScreen(permission)
         }
     }
 }
@@ -117,7 +119,7 @@ private fun rememberBackProgress(): State<Float?> {
 }
 
 @Composable
-private fun Shell(nav: TabNavigator) {
+private fun Shell(nav: TabNavigator, openPlayer: Int) {
     val app = hiltViewModel<AppViewModel>()
     NotificationPermissionEffect()
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
@@ -127,6 +129,9 @@ private fun Shell(nav: TabNavigator) {
     val player = hiltViewModel<NowPlayingViewModel>()
     val hasMedia by player.snapshot.collectAsStateWithLifecycle().let { st -> androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { st.value.hasMedia } } }
     val sheet = rememberPlayerSheetState()
+    // The notification was tapped: open Now Playing.
+    androidx.compose.runtime.LaunchedEffect(openPlayer) { if (openPlayer > 0) sheet.expand() }
+    var rootHeightPx by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     // Pages pad for the tab bar and, with a song loaded, the mini player resting above it.
     val bottomInset = if (hasMedia) barTop + MiniPlayerGap + MiniPlayerHeight else barTop
 
@@ -164,7 +169,7 @@ private fun Shell(nav: TabNavigator) {
     CompositionLocalProvider(LocalBottomBarInset provides bottomInset, LocalChromeBlurState provides blur) {
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this) {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).onSizeChanged { rootHeightPx = it.height.toFloat() }) {
                     Box(Modifier.fillMaxSize().chromeSource(blur)) {
                         NavDisplay(
                             backStack = nav.backStack.map { TabDestination(nav.current, it) },
@@ -186,8 +191,14 @@ private fun Shell(nav: TabNavigator) {
                         onSelect = nav::select,
                         blur = blur,
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
-                            // The open player slides the bar off the bottom.
-                            .graphicsLayer { translationY = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx() },
+                            // The open player slides the bar off the bottom; a mini player thrown down pushes it the same way (capped), and
+                            // once the pill is gone the push springs back on its own.
+                            .graphicsLayer {
+                                val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx()
+                                val cap = 0.1f * (rootHeightPx - (barTop + MiniPlayerGap + MiniPlayerHeight).toPx())
+                                val pushed = sheet.barPush
+                                translationY = maxOf(slide, if (pushed > 0f && cap > 0f) cap * kotlin.math.tanh(pushed / cap) else 0f)
+                            },
                     )
                     PlayerSheet(sheet, restingBottom = barTop + MiniPlayerGap, blur = blur)
                 }

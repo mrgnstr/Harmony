@@ -22,8 +22,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
-/** [dominant] is the most common colour (ARGB), [bottomLuminance] the mean brightness (0..1) of the picture's bottom edge. */
-class CoverSample(val dominant: Int?, val bottomLuminance: Float)
+/** [dominant] is the most common colour (ARGB), [bottomLuminance] the mean brightness (0..1) of the picture's bottom and top edge. */
+class CoverSample(val dominant: Int?, val bottomLuminance: Float, val topLuminance: Float)
 
 /** Palette extraction happens here, once per album, never while scrolling. Results live in Room. */
 @Singleton
@@ -99,13 +99,16 @@ class ArtworkColorStore @Inject constructor(
         val bitmap = ArtworkDecoder.decode(context, songId, albumId, SAMPLE_PX) ?: return@withContext null
         val source = if (bitmap.hasAlpha()) opaquePixelsOf(bitmap) ?: bitmap else bitmap
         val dominant = Palette.from(source).maximumColorCount(16).generate().dominantSwatch?.rgb?.or(OPAQUE)
-        // Mean brightness (0..1, sRGB weights) of the bottom twelfth of the picture.
+        // Mean brightness (0..1, sRGB weights) of the bottom and top twelfth of the picture.
         val rows = (bitmap.height / 12).coerceAtLeast(1)
         val px = IntArray(bitmap.width * rows)
-        bitmap.getPixels(px, 0, bitmap.width, 0, bitmap.height - rows, bitmap.width, rows)
-        var sum = 0f
-        for (c in px) sum += (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)) / 255f
-        CoverSample(dominant, sum / px.size)
+        fun edge(top: Boolean): Float {
+            bitmap.getPixels(px, 0, bitmap.width, 0, if (top) 0 else bitmap.height - rows, bitmap.width, rows)
+            var sum = 0f
+            for (c in px) sum += (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)) / 255f
+            return sum / px.size
+        }
+        CoverSample(dominant, bottomLuminance = edge(top = false), topLuminance = edge(top = true))
     }
 
     private fun decodeFile(path: String): Bitmap? {
