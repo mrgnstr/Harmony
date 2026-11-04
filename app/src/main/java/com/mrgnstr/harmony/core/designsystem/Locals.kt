@@ -32,6 +32,9 @@ fun realTimeBlur(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAM
     BlurMode.Off -> false
 }
 
+/** The expanded top bar's height ([TopBarScaffold]): the page scrolls under the bar, so its content pads its first item with this. */
+val LocalTopBarInset = compositionLocalOf { 0.dp }
+
 /** Space the floating tab bar / mini player cover at the bottom, so scrolling content can pad for it. */
 val LocalBottomBarInset = compositionLocalOf { 0.dp }
 

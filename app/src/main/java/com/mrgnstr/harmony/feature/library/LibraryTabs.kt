@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
@@ -34,7 +35,8 @@ import java.io.File
 
 /** Room under the list for the floating tab bar and the mini player. */
 @Composable
-internal fun listPadding() = PaddingValues(top = 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
+internal fun listPadding() = PaddingValues(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
+
 
 /** A grid page: [columns] tiles across, headers spanning all of them. */
 @Composable
