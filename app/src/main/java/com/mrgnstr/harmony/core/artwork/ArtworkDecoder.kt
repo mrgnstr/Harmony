@@ -12,20 +12,19 @@ import android.util.Size
 import androidx.annotation.RequiresApi
 
 /**
- * One place that knows every way to get album art off a device, newest API first:
- *  - API 29+: ContentResolver.loadThumbnail on the album URI (scaled by the system).
- *  - API < 29: the legacy content://media/external/audio/albumart/<id> URI.
- *  - everywhere: the song file's embedded picture.
+ * One place that knows every way to get album art off a device:
+ *  - the song file's embedded picture, at full quality;
+ *  - else API 29+: ContentResolver.loadThumbnail on the album URI (scaled by the system);
+ *  - else API < 29: the legacy content://media/external/audio/albumart/<id> URI.
  * Returns a software bitmap whose longest side is about [targetPx], or null if there is no art.
  */
 object ArtworkDecoder {
     fun decode(context: Context, songId: Long, albumId: Long, targetPx: Int): Bitmap? {
         val px = targetPx.coerceIn(16, 2048)
-        if (albumId > 0) {
-            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) thumbnail(context, albumId, px) else legacyAlbumArt(context, albumId, px))
-                ?.let { return it }
-        }
-        return embedded(context, songId, px)
+        // The embedded picture first: the system's album thumbnails can be small or built from a low-resolution copy.
+        embedded(context, songId, px)?.let { return it }
+        if (albumId <= 0) return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) thumbnail(context, albumId, px) else legacyAlbumArt(context, albumId, px)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
