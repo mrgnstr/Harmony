@@ -35,6 +35,12 @@ fun realTimeBlur(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAM
 /** The expanded top bar's height ([TopBarScaffold]): the page scrolls under the bar, so its content pads its first item with this. */
 val LocalTopBarInset = compositionLocalOf { 0.dp }
 
+/**
+ * How far the top bar collapses ([TopBarScaffold]). The page is laid out that much taller than the screen and slid up as the bar
+ * collapses, so while the bar is expanded the page's bottom edge is this far below the screen's.
+ */
+val LocalTopBarCollapse = compositionLocalOf { 0.dp }
+
 /** Space the floating tab bar / mini player cover at the bottom, so scrolling content can pad for it. */
 val LocalBottomBarInset = compositionLocalOf { 0.dp }
 

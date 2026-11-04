@@ -50,6 +50,7 @@ import com.mrgnstr.harmony.core.designsystem.components.gridCellPadding
 import com.mrgnstr.harmony.core.designsystem.components.itemMotion
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
+import com.mrgnstr.harmony.core.model.SortKey
 import com.mrgnstr.harmony.core.model.Playlist
 
 private sealed interface Editing {
@@ -63,7 +64,11 @@ fun PlaylistsTab(viewModel: LibraryViewModel, onOpenPlaylist: (Long) -> Unit) {
     var editing by remember { mutableStateOf<Editing?>(null) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
 
-    TileGrid { columns ->
+    val key = viewModel.sorts.collectAsStateWithLifecycle().value.getValue(LibraryTab.Playlists).key
+    // Item 0 is the New Playlist tile and Favourites is pinned first; neither has a letter.
+    TileGrid(playlists.size + 1, { i ->
+        playlists.getOrNull(i - 1)?.takeIf { key == SortKey.Title && !it.isFavourites }?.let { letterOf(it.name) }
+    }) { columns ->
         // The first cell: a tile that makes a new playlist.
         item(key = "new", contentType = "new") {
             ArtworkTile("New Playlist", null, { editing = Editing.New }, Modifier.padding(gridCellPadding(0, columns))) { cover ->

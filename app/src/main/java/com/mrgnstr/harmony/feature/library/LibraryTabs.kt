@@ -1,12 +1,15 @@
 package com.mrgnstr.harmony.feature.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,7 +26,12 @@ import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
+import com.mrgnstr.harmony.core.designsystem.components.EmptyState
+import com.mrgnstr.harmony.core.designsystem.icons.Symbol
+import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
+import com.mrgnstr.harmony.core.designsystem.components.LazyGridFastScroller
+import com.mrgnstr.harmony.core.designsystem.components.LazyListFastScroller
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
 import com.mrgnstr.harmony.core.designsystem.components.SongRow
 import com.mrgnstr.harmony.core.designsystem.components.gridCellPadding
@@ -31,6 +39,8 @@ import com.mrgnstr.harmony.core.designsystem.components.gridColumns
 import com.mrgnstr.harmony.core.designsystem.components.itemMotion
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.Artist
+import com.mrgnstr.harmony.core.model.Song
+import com.mrgnstr.harmony.core.model.SortKey
 import java.io.File
 
 /** Room under the list for the floating tab bar and the mini player. */
@@ -38,28 +48,52 @@ import java.io.File
 internal fun listPadding() = PaddingValues(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
 
 
-/** A grid page: [columns] tiles across, headers spanning all of them. */
+/**
+ * A grid page: [columns] tiles across, headers spanning all of them, and a fast scroller over it. [labelOf] names an item index for
+ * the scroller's bubble (null where the ordering is not alphabetical).
+ */
 @Composable
-internal fun TileGrid(content: LazyGridScope.(columns: Int) -> Unit) {
+internal fun TileGrid(itemCount: Int, labelOf: (Int) -> String? = { null }, content: LazyGridScope.(columns: Int) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val columns = gridColumns(maxWidth)
+        val grid = rememberLazyGridState()
         LazyVerticalGrid(
-            GridCells.Fixed(columns), Modifier.fillMaxSize(), contentPadding = listPadding(),
+            GridCells.Fixed(columns), Modifier.fillMaxSize(), grid, contentPadding = listPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) { content(columns) }
+        // The page box starts above the collapsed bar (it is slid up with it), so the track starts below the expanded height.
+        LazyGridFastScroller(grid, itemCount, labelOf, topInset = LocalTopBarInset.current + 8.dp, bottomInset = LocalBottomBarInset.current + 8.dp)
     }
+}
+
+/** An empty tab: a spinner while the first scan is still running, otherwise [title] and [message]. */
+@Composable
+internal fun LibraryEmpty(viewModel: LibraryViewModel, symbol: Symbol, title: String, message: String) {
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+    EmptyState(loading, symbol, title, message)
+}
+
+/** The letter a name files under; "#" for a name that does not start with one. */
+internal fun letterOf(name: String): String {
+    val first = name.trim().firstOrNull() ?: return "#"
+    return if (first.isLetter()) first.uppercaseChar().toString() else "#"
 }
 
 @Composable
 fun RecentlyAddedTab(viewModel: LibraryViewModel, onOpenAlbum: (Album) -> Unit) {
     val albums by viewModel.recentlyAdded.collectAsStateWithLifecycle()
-    TileGrid { columns -> albumTiles(albums, columns, onOpenAlbum) }
+    if (albums.isEmpty()) return LibraryEmpty(viewModel, Symbols.Library, "Nothing added yet", "Music you add to this phone shows up here.")
+    TileGrid(albums.size) { columns -> albumTiles(albums, columns, onOpenAlbum) }
 }
 
 @Composable
 fun AlbumsTab(viewModel: LibraryViewModel, onOpenAlbum: (Album) -> Unit) {
     val albums by viewModel.albums.collectAsStateWithLifecycle()
-    TileGrid { columns -> albumTiles(albums, columns, onOpenAlbum) }
+    val key = viewModel.sorts.collectAsStateWithLifecycle().value.getValue(LibraryTab.Albums).key
+    if (albums.isEmpty()) return LibraryEmpty(viewModel, Symbols.Album, "No albums", "Albums show up here once your music is found.")
+    TileGrid(albums.size, { i ->
+        albums.getOrNull(i)?.let { when (key) { SortKey.Title -> letterOf(it.title); SortKey.Artist -> letterOf(it.artist); else -> null } }
+    }) { columns -> albumTiles(albums, columns, onOpenAlbum) }
 }
 
 private fun LazyGridScope.albumTiles(albums: List<Album>, columns: Int, onOpenAlbum: (Album) -> Unit) {
@@ -71,20 +105,45 @@ private fun LazyGridScope.albumTiles(albums: List<Album>, columns: Int, onOpenAl
 @Composable
 fun SongsTab(viewModel: LibraryViewModel) {
     val songs by viewModel.songs.collectAsStateWithLifecycle()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = listPadding()) {
-        item(key = "buttons", contentType = "buttons") {
-            PlayShuffleButtons(onPlay = { viewModel.play(songs, 0) }, onShuffle = { viewModel.shuffle(songs) }, modifier = Modifier.padding(bottom = 8.dp))
+    val sorts by viewModel.sorts.collectAsStateWithLifecycle()
+    val key = sorts.getValue(LibraryTab.Songs).key
+    val list = rememberLazyListState()
+    if (songs.isEmpty()) return LibraryEmpty(viewModel, Symbols.MusicNote, "No songs", "Songs show up here once your music is found.")
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), list, contentPadding = listPadding()) {
+            item(key = "buttons", contentType = "buttons") {
+                PlayShuffleButtons(onPlay = { viewModel.play(songs, 0) }, onShuffle = { viewModel.shuffle(songs) }, modifier = Modifier.padding(bottom = 8.dp))
+            }
+            itemsIndexed(songs, key = { _, song -> song.id }, contentType = { _, _ -> "song" }) { index, song ->
+                SongRow(song, onClick = { viewModel.play(songs, index) }, modifier = itemMotion())
+            }
         }
-        itemsIndexed(songs, key = { _, song -> song.id }, contentType = { _, _ -> "song" }) { index, song ->
-            SongRow(song, onClick = { viewModel.play(songs, index) }, modifier = itemMotion())
-        }
+        // Item 0 is the Play/Shuffle row; the songs follow. Only the orderings by name have letters to show.
+        LazyListFastScroller(
+            list, itemCount = songs.size + 1,
+            labelOf = { i -> songs.getOrNull((i - 1).coerceAtLeast(0))?.let { songLetter(it, key) } },
+            // The page box starts above the collapsed bar (it is slid up with it), so the track starts below the expanded height.
+            topInset = LocalTopBarInset.current + 8.dp,
+            bottomInset = LocalBottomBarInset.current + 8.dp,
+        )
     }
+}
+
+/** The letter a song files under in an ordering by name; null for the orderings that are not alphabetical. */
+private fun songLetter(song: Song, key: SortKey): String? = when (key) {
+    SortKey.Title -> letterOf(song.title)
+    SortKey.Artist -> letterOf(song.artist)
+    SortKey.AlbumArtist -> letterOf(song.albumArtist)
+    SortKey.Album -> letterOf(song.album)
+    else -> null
 }
 
 @Composable
 fun ArtistsTab(viewModel: LibraryViewModel, onOpenArtist: (Artist) -> Unit) {
     val artists by viewModel.artists.collectAsStateWithLifecycle()
-    TileGrid { columns ->
+    val key = viewModel.sorts.collectAsStateWithLifecycle().value.getValue(LibraryTab.Artists).key
+    if (artists.isEmpty()) return LibraryEmpty(viewModel, Symbols.Artist, "No artists", "Artists show up here once your music is found.")
+    TileGrid(artists.size, { i -> artists.getOrNull(i)?.takeIf { key == SortKey.Title }?.let { letterOf(it.name) } }) { columns ->
         gridItemsIndexed(artists, key = { _, a -> "artist:${a.name}" }, contentType = { _, _ -> "artist" }) { i, artist ->
             ArtworkTile(
                 artist.name, null, { onOpenArtist(artist) },

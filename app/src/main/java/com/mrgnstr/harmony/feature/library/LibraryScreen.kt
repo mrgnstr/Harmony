@@ -38,6 +38,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabPosition
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -48,7 +50,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mrgnstr.harmony.core.designsystem.components.TopBarScaffold
@@ -96,7 +100,26 @@ fun LibraryRoute(
             PrimaryScrollableTabRow(
                 selectedTabIndex = pager.currentPage,
                 containerColor = Color.Transparent,
-                edgePadding = 16.dp,
+                edgePadding = TabEdgePadding,
+                indicator = {
+                    // Follows the swipe: between two tabs it sits between them, its width blending too.
+                    TabRowDefaults.PrimaryIndicator(
+                        Modifier.tabIndicatorLayout { measurable, constraints, positions ->
+                            val at = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, positions.lastIndex.toFloat())
+                            val from = positions[at.toInt()]
+                            val to = positions[(at.toInt() + 1).coerceAtMost(positions.lastIndex)]
+                            val t = at - at.toInt()
+                            // The indicator's slot already sits past the row's edge padding, which the tab positions include.
+                            fun left(p: TabPosition) = p.left + (p.width - p.contentWidth) / 2 - TabEdgePadding
+                            val width = lerp(from.contentWidth, to.contentWidth, t).roundToPx()
+                            val placeable = measurable.measure(Constraints(width, width, 0, constraints.maxHeight))
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                placeable.place(lerp(left(from), left(to), t).roundToPx(), constraints.maxHeight - placeable.height)
+                            }
+                        },
+                        width = Dp.Unspecified,
+                    )
+                },
                 divider = {},
             ) {
                 tabs.forEachIndexed { index, tab ->
@@ -121,6 +144,8 @@ fun LibraryRoute(
         }
     }
 }
+
+private val TabEdgePadding = 16.dp
 
 /** The tab's keys with a check on the chosen one, then the direction. Choosing the chosen key again flips the direction too. */
 @Composable

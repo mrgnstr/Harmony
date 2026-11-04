@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import com.mrgnstr.harmony.core.designsystem.LocalTopBarCollapse
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
 import com.mrgnstr.harmony.core.designsystem.blur.chromeSource
@@ -94,7 +95,10 @@ fun TopBarScaffold(
 
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).nestedScroll(scroll.nestedScrollConnection)) {
         // Scaffold used to set this; without it every Text on the page falls back to the light theme's black.
-        CompositionLocalProvider(LocalTopBarInset provides expandedInset, LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+        CompositionLocalProvider(
+            LocalTopBarInset provides expandedInset,
+            LocalTopBarCollapse provides with(density) { distance.toDp() },
+            LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             Box(
                 Modifier
                     .fillMaxSize()

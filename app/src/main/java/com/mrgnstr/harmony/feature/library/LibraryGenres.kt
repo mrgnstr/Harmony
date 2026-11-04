@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mrgnstr.harmony.core.designsystem.icons.Symbols
+import com.mrgnstr.harmony.core.model.SortKey
 import com.materialkolor.hct.Hct
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.components.TileCoverShape
@@ -39,7 +41,9 @@ import com.mrgnstr.harmony.core.designsystem.motion.pressResponse
 @Composable
 fun GenresTab(viewModel: LibraryViewModel, onOpenGenre: (String) -> Unit) {
     val genres by viewModel.genres.collectAsStateWithLifecycle()
-    TileGrid { columns ->
+    val key = viewModel.sorts.collectAsStateWithLifecycle().value.getValue(LibraryTab.Genres).key
+    if (genres.isEmpty()) return LibraryEmpty(viewModel, Symbols.Genres, "No genres", "Genres come from the tags in your music files.")
+    TileGrid(genres.size, { i -> genres.getOrNull(i)?.takeIf { key == SortKey.Title }?.let { letterOf(it.name) } }) { columns ->
         itemsIndexed(genres, key = { _, g -> g.name }, contentType = { _, _ -> "genre" }) { i, genre ->
             GenreCardTile(genre, { onOpenGenre(genre.name) }, itemMotion().padding(gridCellPadding(i % columns, columns)))
         }

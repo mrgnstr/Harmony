@@ -69,7 +69,7 @@ private fun <T> Comparator<T>.direction(ascending: Boolean) = if (ascending) thi
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    library: LibraryRepository,
+    private val library: LibraryRepository,
     history: HistoryRepository,
     imageStore: ArtistImageStore,
     private val playlistRepository: PlaylistRepository,
@@ -79,6 +79,10 @@ class LibraryViewModel @Inject constructor(
     val sorts: StateFlow<Map<LibraryTab, LibrarySort>> = settings.librarySorts
         .map { saved -> LibraryTab.entries.associateWith { tab -> saved[tab.name]?.takeIf { it.key in tab.keys } ?: tab.default } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryTab.entries.associateWith { it.default })
+
+    /** The first scan of this launch has not finished: an empty page is still filling in, not empty. */
+    val loading: StateFlow<Boolean> = library.syncState.map { !it.completedOnce && !it.failed }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     fun setSort(tab: LibraryTab, sort: LibrarySort) { viewModelScope.launch { settings.setLibrarySort(tab.name, sort) } }
 
