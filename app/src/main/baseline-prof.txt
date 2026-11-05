@@ -1,0 +1,11 @@
+# Baseline profile: the app's own code is compiled ahead of time at install, so the first scroll/open is not interpreted.
+# (The Compose, Media3 and Room libraries ship their own profiles, which are merged in.) Wildcards: every method of every class.
+HSPLcom/mrgnstr/harmony/**->**(**)**
+Lcom/mrgnstr/harmony/**
+# Libraries without a profile of their own that every frame touches.
+HSPLdev/chrisbanes/haze/**->**(**)**
+Ldev/chrisbanes/haze/**
+HSPLcoil3/**->**(**)**
+Lcoil3/**
+HSPLcom/materialkolor/**->**(**)**
+Lcom/materialkolor/**

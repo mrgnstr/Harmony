@@ -11,12 +11,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -85,6 +88,9 @@ fun LibraryRoute(
     val sorts by viewModel.sorts.collectAsStateWithLifecycle()
     val current = tabs[pager.currentPage]
     var sortMenuOpen by remember { mutableStateOf(false) }
+    // Where each tab's label is drawn (x in the window, width), and where the indicator's slot starts: the indicator is placed from these.
+    val labels = remember { mutableStateListOf<Pair<Float, Int>>().apply { repeat(tabs.size) { add(0f to 0) } } }
+    var slotX by remember { mutableFloatStateOf(0f) }
     TopBarScaffold(
         title = "Library",
         actions = {
@@ -102,19 +108,30 @@ fun LibraryRoute(
                 containerColor = Color.Transparent,
                 edgePadding = TabEdgePadding,
                 indicator = {
-                    // Follows the swipe: between two tabs it sits between them, its width blending too.
+                    // Follows the swipe: between two tabs it sits between them, its width blending too. It lines up with the label as
+                    // drawn (measured), not with the tab positions: a tab wider than its label keeps the label off its centre.
                     TabRowDefaults.PrimaryIndicator(
-                        Modifier.tabIndicatorLayout { measurable, constraints, positions ->
+                        Modifier.onGloballyPositioned { slotX = it.positionInRoot().x }.tabIndicatorLayout { measurable, constraints, positions ->
                             val at = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, positions.lastIndex.toFloat())
-                            val from = positions[at.toInt()]
-                            val to = positions[(at.toInt() + 1).coerceAtMost(positions.lastIndex)]
-                            val t = at - at.toInt()
-                            // The indicator's slot already sits past the row's edge padding, which the tab positions include.
-                            fun left(p: TabPosition) = p.left + (p.width - p.contentWidth) / 2 - TabEdgePadding
-                            val width = lerp(from.contentWidth, to.contentWidth, t).roundToPx()
+                            val i = at.toInt()
+                            val j = (i + 1).coerceAtMost(positions.lastIndex)
+                            val t = at - i
+                            val a = labels[i]
+                            val b = labels[j]
+                            val width: Int
+                            val x: Float
+                            if (a.second > 0 && b.second > 0) {
+                                width = lerp(a.second.toFloat(), b.second.toFloat(), t).roundToInt()
+                                x = lerp(a.first, b.first, t) - slotX
+                            } else {
+                                // Not measured yet: the row's own positions (its slot already sits past the edge padding).
+                                fun left(p: TabPosition) = p.left + (p.width - p.contentWidth) / 2 - TabEdgePadding
+                                width = lerp(positions[i].contentWidth, positions[j].contentWidth, t).roundToPx()
+                                x = lerp(left(positions[i]), left(positions[j]), t).toPx()
+                            }
                             val placeable = measurable.measure(Constraints(width, width, 0, constraints.maxHeight))
                             layout(constraints.maxWidth, constraints.maxHeight) {
-                                placeable.place(lerp(left(from), left(to), t).roundToPx(), constraints.maxHeight - placeable.height)
+                                placeable.place(x.roundToInt(), constraints.maxHeight - placeable.height)
                             }
                         },
                         width = Dp.Unspecified,
@@ -126,7 +143,9 @@ fun LibraryRoute(
                     Tab(
                         selected = pager.currentPage == index,
                         onClick = { scope.launch { pager.animateScrollToPage(index, animationSpec = Springs.land()) } },
-                        text = { Text(tab.label) },
+                        text = {
+                            Text(tab.label, Modifier.onGloballyPositioned { labels[index] = it.positionInRoot().x to it.size.width })
+                        },
                     )
                 }
             }

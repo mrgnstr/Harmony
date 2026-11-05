@@ -10,21 +10,71 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
 import androidx.annotation.RequiresApi
+import java.io.File
 
 /**
  * One place that knows every way to get album art off a device:
- *  - the song file's embedded picture, at full quality;
+ *  - the song file's embedded picture, at full quality (cached on disk after the first read);
  *  - else API 29+: ContentResolver.loadThumbnail on the album URI (scaled by the system);
  *  - else API < 29: the legacy content://media/external/audio/albumart/<id> URI.
  * Returns a software bitmap whose longest side is about [targetPx], or null if there is no art.
  */
 object ArtworkDecoder {
+    private const val CACHE_DIR = "artwork"
+    private const val MAX_CACHE_BYTES = 200L * 1024 * 1024
+    private const val TRIM_EVERY = 50
+    /** Cached sizes: a request is served from (and stored at) the next size up, so a few files cover every tile size. */
+    private val BUCKETS = intArrayOf(96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048)
+
     fun decode(context: Context, songId: Long, albumId: Long, targetPx: Int): Bitmap? {
         val px = targetPx.coerceIn(16, 2048)
-        // The embedded picture first: the system's album thumbnails can be small or built from a low-resolution copy.
-        embedded(context, songId, px)?.let { return it }
+        val id = if (albumId > 0) "a$albumId" else "s$songId"
+        // The embedded picture first: the system's album thumbnails can be small or built from a low-resolution copy. Reading it
+        // means opening the song file (100+ ms on a fast phone), so the scaled result is kept on disk, and so is "this one has none".
+        val dir = File(context.cacheDir, CACHE_DIR).apply { mkdirs() }
+        val none = File(dir, "$id.none")
+        if (!none.exists()) {
+            val bucket = BUCKETS.firstOrNull { it >= px } ?: BUCKETS.last()
+            val cached = File(dir, "$id-$bucket")
+            readCached(cached)?.let { return it }
+            val fresh = embedded(context, songId, bucket)
+            if (fresh != null) {
+                writeCached(dir, cached, fresh)
+                return fresh
+            }
+            runCatching { none.createNewFile() }
+        }
         if (albumId <= 0) return null
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) thumbnail(context, albumId, px) else legacyAlbumArt(context, albumId, px)
+    }
+
+    private fun readCached(file: File): Bitmap? =
+        if (file.exists()) runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() else null
+
+    private var writes = 0
+
+    private fun writeCached(dir: File, file: File, bitmap: Bitmap) {
+        runCatching {
+            // Written aside and renamed, so a reader never sees half a file.
+            val tmp = File(dir, "${file.name}.tmp${Thread.currentThread().id}")
+            tmp.outputStream().use { out ->
+                if (bitmap.hasAlpha()) bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) else bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            }
+            if (!tmp.renameTo(file)) tmp.delete()
+        }
+        if (++writes % TRIM_EVERY == 0) trim(dir)
+    }
+
+    /** Keeps the cache under [MAX_CACHE_BYTES], oldest files first. */
+    private fun trim(dir: File) {
+        val files = dir.listFiles() ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= MAX_CACHE_BYTES) return
+        for (f in files.sortedBy { it.lastModified() }) {
+            if (total <= MAX_CACHE_BYTES * 3 / 4) break
+            total -= f.length()
+            f.delete()
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)

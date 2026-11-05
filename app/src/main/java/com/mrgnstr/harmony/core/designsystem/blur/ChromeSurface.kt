@@ -78,9 +78,10 @@ fun ChromeSurface(
                 // The captured source is mostly transparent; without an opaque base the sharp content would show through.
                 backgroundColor(opaque)
                 blurRadius(28.dp)
+                noiseFactor(0f)
                 colorEffects(listOf(HazeColorEffect.tint(container.copy(alpha = BlurTintAlpha))))
             },
-            performanceMode = HazePerformanceMode.Balanced,
+            performanceMode = HazePerformanceMode.Performance,
         )
     } else {
         base.background(container.copy(alpha = FlatAlpha))

@@ -40,6 +40,8 @@ class TabNavigator(initial: Map<Tab, List<Dest>> = emptyMap(), start: Tab = Tab.
 
     val backStack: SnapshotStateList<Dest> get() = stacks.getValue(current)
 
+    fun stackOf(tab: Tab): SnapshotStateList<Dest> = stacks.getValue(tab)
+
     /** Selecting the current tab again goes back to its root. */
     fun select(tab: Tab) {
         if (tab == current) backStack.retainAll(listOf(backStack.first())) else current = tab

@@ -10,10 +10,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import kotlin.math.roundToInt
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -121,12 +123,18 @@ fun lerp(a: ColorScheme, b: ColorScheme, t: Float): ColorScheme {
 private val ColorSpring = spring<Float>(dampingRatio = 1f, stiffness = 200f, visibilityThreshold = 0.002f)
 private val LowTierColorTween = tween<Float>(250)
 
+private const val BlendSteps = 20
+
 private class SchemeBlend(initial: ColorScheme) {
     var from = initial
     var to = initial
     val progress = Animatable(1f)
 
-    val current: ColorScheme get() = progress.value.let { if (it >= 1f) to else lerp(from, to, it) }
+    // Read in composition: a colour change recomposes everything that reads a colour (a page full of text and icons, both pages of a
+    // transition), so the blend moves in BlendSteps notches, not every frame. 30 Hz colour is invisible; 60+ recompositions are not.
+    private val step = derivedStateOf { (progress.value * BlendSteps).roundToInt() }
+
+    val current: ColorScheme get() = step.value.let { if (it >= BlendSteps) to else lerp(from, to, it / BlendSteps.toFloat()) }
 
     suspend fun animateTo(target: ColorScheme, lowTier: Boolean) {
         if (target === to) return

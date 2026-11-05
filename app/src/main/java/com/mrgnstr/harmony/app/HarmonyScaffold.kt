@@ -3,6 +3,7 @@ package com.mrgnstr.harmony.app
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
@@ -32,6 +33,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -53,10 +57,15 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
+import kotlinx.coroutines.delay
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.blur.LocalChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.chromeSource
 import com.mrgnstr.harmony.core.designsystem.blur.rememberChromeBlurState
+import com.mrgnstr.harmony.core.designsystem.LocalChromeBlurMode
+import com.mrgnstr.harmony.core.designsystem.LocalCoverBlurMode
+import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.ColorSourceRegistry
 import com.mrgnstr.harmony.core.designsystem.theme.HarmonyTheme
 import com.mrgnstr.harmony.core.designsystem.theme.LocalColorSourceRegistry
@@ -79,6 +88,8 @@ import com.mrgnstr.harmony.feature.settings.SettingsRoute
 /** A back stack entry, scoped to its tab: the same album can be open on two tabs with independent state. */
 private data class TabDestination(val tab: Tab, val destination: Dest)
 private const val TabMetadata = "harmony.tab"
+private const val PrebuildDelayMs = 1500L
+private const val PrebuildGapMs = 400L
 
 /**
  * The app: resolves the colour source of the page on top and themes everything with it (blending towards the page below
@@ -100,7 +111,7 @@ fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur:
     HarmonyTheme(scheme, tier, chromeBlur, coverBlur) {
         CompositionLocalProvider(LocalColorSourceRegistry provides registry) {
             val permission = rememberAudioPermissionState()
-            if (permission.granted) Shell(nav, openPlayer) else OnboardingScreen(permission)
+            if (permission.granted) Shell(nav, openPlayer, schemes, dark) else OnboardingScreen(permission)
         }
     }
 }
@@ -119,7 +130,7 @@ private fun rememberBackProgress(): State<Float?> {
 }
 
 @Composable
-private fun Shell(nav: TabNavigator, openPlayer: Int) {
+private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, dark: Boolean) {
     val app = hiltViewModel<AppViewModel>()
     NotificationPermissionEffect()
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
@@ -129,6 +140,17 @@ private fun Shell(nav: TabNavigator, openPlayer: Int) {
     val player = hiltViewModel<NowPlayingViewModel>()
     val hasMedia by player.snapshot.collectAsStateWithLifecycle().let { st -> androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { st.value.hasMedia } } }
     val sheet = rememberPlayerSheetState()
+    // Tabs are built when first shown, and the rest a moment after launch so the first switch to them is free too.
+    val built = remember(nav) { mutableStateSetOf(nav.current) }
+    LaunchedEffect(nav.current) { built.add(nav.current) }
+    LaunchedEffect(Unit) { delay(PrebuildDelayMs); Tab.entries.forEach { built.add(it); delay(PrebuildGapMs) } }
+    // Which tab is on screen, as a position along the row of tabs (a switch glides it; a drag could drive it).
+    val position = remember { Animatable(nav.current.ordinal.toFloat()) }
+    LaunchedEffect(nav.current) {
+        val target = nav.current.ordinal.toFloat()
+        if (tier.value == VisualTier.LOW) position.animateTo(target, tween(180, easing = FastOutSlowInEasing))
+        else position.animateTo(target, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
+    }
     // The notification was tapped: open Now Playing.
     androidx.compose.runtime.LaunchedEffect(openPlayer) { if (openPlayer > 0) sheet.expand() }
     var rootHeightPx by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -165,7 +187,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int) {
         { key: TabDestination ->
             val entry = entries(key.destination)
             NavEntry(key = key, contentKey = "${key.tab.name}:${entry.contentKey}", metadata = entry.metadata + (TabMetadata to key.tab)) {
-                CompositionLocalProvider(LocalEntryKey provides key) { entry.Content() }
+                CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, schemes, dark, tier.value) { entry.Content() } }
             }
         }
     }
@@ -173,22 +195,37 @@ private fun Shell(nav: TabNavigator, openPlayer: Int) {
     CompositionLocalProvider(LocalBottomBarInset provides bottomInset, LocalChromeBlurState provides blur) {
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this) {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).onSizeChanged { rootHeightPx = it.height.toFloat() }) {
+                Box(Modifier.fillMaxSize().onSizeChanged { rootHeightPx = it.height.toFloat() }) {
+                    // Its own scope: the colour read (it animates) must not recompose the whole shell.
+                    SurfaceFill()
+                    // Every tab keeps its own NavDisplay alive, laid side by side and slid as a row: switching tabs builds nothing (a page
+                    // is built once, keeps its scroll and state), where one NavDisplay swapping back stacks rebuilt the whole page mid-slide.
                     Box(Modifier.fillMaxSize().chromeSource(blur)) {
-                        NavDisplay(
-                            backStack = nav.backStack.map { TabDestination(nav.current, it) },
-                            modifier = Modifier.fillMaxSize().clipToBounds(),
-                            onBack = { nav.pop() },
-                            entryDecorators = listOf(
-                                rememberSaveableStateHolderNavEntryDecorator(),
-                                rememberViewModelStoreNavEntryDecorator(),
-                            ),
-                            sharedTransitionScope = this@SharedTransitionLayout,
-                            entryProvider = tabEntries,
-                            transitionSpec = { tabSlide(tier.value) ?: pushTransition() },
-                            popTransitionSpec = { tabSlide(tier.value) ?: popTransition() },
-                            predictivePopTransitionSpec = { predictivePopTransition() },
-                        )
+                        Tab.entries.forEach { tab ->
+                            // A tab is built on its first visit (the others shortly after launch, see above) and then stays.
+                            if (tab in built) key(tab) {
+                                // Only the tab on screen answers the back gesture; the others sit under a disabled dispatcher.
+                                val dispatcher = rememberNavigationEventDispatcherOwner(enabled = nav.current == tab)
+                                CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides dispatcher) {
+                                    NavDisplay(
+                                        backStack = nav.stackOf(tab).map { TabDestination(tab, it) },
+                                        modifier = Modifier.fillMaxSize().clipToBounds().graphicsLayer {
+                                            translationX = (tab.ordinal - position.value) * size.width
+                                        },
+                                        onBack = { nav.pop() },
+                                        entryDecorators = listOf(
+                                            rememberSaveableStateHolderNavEntryDecorator(),
+                                            rememberViewModelStoreNavEntryDecorator(),
+                                        ),
+                                        sharedTransitionScope = this@SharedTransitionLayout,
+                                        entryProvider = tabEntries,
+                                        transitionSpec = { pushTransition() },
+                                        popTransitionSpec = { popTransition() },
+                                        predictivePopTransitionSpec = { predictivePopTransition() },
+                                    )
+                                }
+                            }
+                        }
                     }
                     AppBar(
                         current = nav.current,
@@ -211,22 +248,25 @@ private fun Shell(nav: TabNavigator, openPlayer: Int) {
     }
 }
 
+/** The theme's surface colour behind everything. */
+@Composable
+private fun SurfaceFill() = Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
+
+/**
+ * A page wears its own colours: the scheme of the source it claimed, blended from the wallpaper's when the claim arrives. Pages
+ * slide past each other (tab switch, push, back) in their own colours, so no colour has to animate across both of them, which
+ * recomposed every colour reader of both pages every frame; only the chrome (tab bar, mini player) blends, in [HarmonyApp].
+ */
+@Composable
+private fun EntryTheme(key: Any, schemes: SchemeFactory, dark: Boolean, tier: VisualTier, content: @Composable () -> Unit) {
+    val registry = LocalColorSourceRegistry.current
+    val target = schemes.scheme(registry?.sourceOf(key) ?: ColorSource.Wallpaper, dark)
+    val scheme = animateColorScheme(target, snap = false, lowTier = tier == VisualTier.LOW)
+    HarmonyTheme(scheme, tier, LocalChromeBlurMode.current, LocalCoverBlurMode.current, content)
+}
+
 /** For pages that share elements across navigation (cover → album header, …). */
 val LocalSharedTransitionScope = staticCompositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }
-
-private fun <T : Any> AnimatedContentTransitionScope<Scene<T>>.tabOf(scene: Scene<T>): Tab? =
-    scene.entries.lastOrNull()?.metadata?.get(TabMetadata) as? Tab
-
-/** Switching tabs slides both pages horizontally in tab order (Home → Library → Search). */
-private fun <T : Any> AnimatedContentTransitionScope<Scene<T>>.tabSlide(tier: VisualTier): ContentTransform? {
-    val from = tabOf(initialState) ?: return null
-    val to = tabOf(targetState) ?: return null
-    if (from == to) return null
-    val direction = if (to.ordinal > from.ordinal) 1 else -1
-    val spec = if (tier == VisualTier.LOW) tween<IntOffset>(180, easing = FastOutSlowInEasing)
-    else spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold)
-    return slideInHorizontally(spec) { it * direction } togetherWith slideOutHorizontally(spec) { -it * direction }
-}
 
 // In-tab pages: Material's shared X axis (a short slide and a fade), on springs that settle without bounce.
 private val PageSlide = spring(dampingRatio = 1f, stiffness = 500f, visibilityThreshold = IntOffset.VisibilityThreshold)
