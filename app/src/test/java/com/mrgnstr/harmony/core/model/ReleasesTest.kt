@@ -56,4 +56,37 @@ class ReleasesTest {
         assertEquals(true, base in fromDeluxe)
         assertEquals(false, deluxe in fromDeluxe)
     }
+    @Test
+    fun heroPrefersNewestFullAlbumAndOriginalEdition() {
+        val original = album(1, "Record", year = 2023)
+        val deluxe = album(2, "Record (Deluxe)", year = 2025)
+        val single = album(3, "New - Single", songs = 1, year = 2026)
+        assertEquals(original, heroOf(listOf(single, deluxe, original)))
+        assertEquals(single, heroOf(listOf(single)))
+        assertEquals(null, heroOf(emptyList()))
+    }
+
+    @Test
+    fun expandedTopSongsKeepsPreviewOrderAndHidesDuplicateEditions() {
+        val a = album(1, "Record")
+        val deluxe = album(2, "Record (Deluxe)")
+        val songs = (1L..7L).map { song(it, "Song $it", a, it.toInt()) } + song(8, "Song 1", deluxe)
+        val counts = mapOf(7L to 10, 6L to 4)
+        val all = topSongs(songs, listOf(a, deluxe), counts, songs.size)
+        assertEquals(7, all.size)
+        assertEquals(listOf(7L, 6L), all.take(2).map { it.id })
+        assertEquals(topSongs(songs, listOf(a, deluxe), counts), all.take(5))
+    }
+
+    @Test
+    fun featuredCreditsMatchArtistFieldsAndExplicitTitleCredits() {
+        val other = album(1, "Guest record", artist = "B")
+        val index = ArtistIndex(listOf("A", "B", "Ann", "Anne", "AC/DC"))
+        assertEquals(true, song(1, "Duet", other, artist = "B & A").featuresArtist("A", index))
+        assertEquals(true, song(2, "Duet (feat. A)", other).featuresArtist("A", index))
+        assertEquals(true, song(3, "Duet [ft. A & B]", other).featuresArtist("A", index))
+        assertEquals(true, song(4, "Duet (feat. AC/DC)", other).featuresArtist("AC/DC", index))
+        assertEquals(false, song(5, "Duet (feat. Anne)", other).featuresArtist("Ann", index))
+        assertEquals(false, song(6, "A love song", other).featuresArtist("A", index))
+    }
 }

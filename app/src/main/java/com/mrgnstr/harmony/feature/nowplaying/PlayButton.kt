@@ -5,6 +5,7 @@ package com.mrgnstr.harmony.feature.nowplaying
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -13,6 +14,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,6 +22,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -42,7 +45,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.graphics.shapes.CornerRounding
 import androidx.graphics.shapes.RoundedPolygon
+import androidx.graphics.shapes.rectangle
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -102,7 +107,6 @@ private fun radialProfile(polygon: RoundedPolygon): FloatArray {
 
 private val CircleProfile by lazy { radialProfile(MaterialShapes.Circle) }
 private val CookieProfile by lazy { radialProfile(MaterialShapes.Cookie9Sided) }
-private val SquareProfile by lazy { radialProfile(MaterialShapes.Square) }
 
 /** A snapshot of a morph ([radii] is copied): a new instance is set on the layer every frame, as Compose caches a shape's outline. */
 @Stable
@@ -134,7 +138,7 @@ fun PlayButton(playing: Boolean, onToggle: () -> Unit, modifier: Modifier = Modi
 
 /**
  * A play/pause button: a circle while paused, the cookie while playing, and a rounded square while held. The change
- * between them is a slow spring that blends from whatever shape is showing. With [cutOut] the glyph is cut out of the container
+ * between them uses the standard icon-button effects animation and blends from whatever shape is showing. With [cutOut] the glyph is cut out of the container
  * (an offscreen layer lets it clear the container), so what is behind shows through; it morphs between play and pause.
  */
 @Composable
@@ -147,10 +151,21 @@ fun MorphingPlayButton(
     contentColor: Color,
     modifier: Modifier = Modifier,
     cutOut: Boolean = false,
-) {    val interaction = remember { MutableInteractionSource() }
+) {
+    val density = LocalDensity.current
+    val pressedCorners = IconButtonDefaults.toggleableShapes().pressedShape as CornerBasedShape
+    val pressedRadius = with(density) {
+        val side = size.toPx()
+        (pressedCorners.topStart.toPx(Size(side, side), density) + 2.dp.toPx()) / (side / 2f)
+    }
+    val pressedProfile = remember(pressedRadius) {
+        radialProfile(RoundedPolygon.rectangle(width = 2f, height = 2f, rounding = CornerRounding(pressedRadius)))
+    }
+    val shapeMotion = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val target = when {
-        pressed -> SquareProfile
+        pressed -> pressedProfile
         playing -> CookieProfile
         else -> CircleProfile
     }
@@ -166,7 +181,7 @@ fun MorphingPlayButton(
         shown.copyInto(from) // start from what is on screen now, so an interrupted morph never jumps
         target.copyInto(to)
         blend.snapTo(0f)
-        blend.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = 170f))
+        blend.animateTo(1f, shapeMotion)
     }
     FilledIconToggleButton(
         checked = playing,

@@ -48,7 +48,7 @@ fun HarmonyTheme(
 class ColorSourceRegistry {
     private val claims = mutableStateMapOf<Any, ColorSource>()
 
-    fun sourceOf(entryKey: Any?): ColorSource = entryKey?.let { claims[it] } ?: ColorSource.Wallpaper
+    fun sourceOf(entryKey: Any?, fallback: ColorSource = ColorSource.Wallpaper): ColorSource = entryKey?.let { claims[it] } ?: fallback
 
     internal fun claim(entryKey: Any, source: ColorSource) { claims[entryKey] = source }
 

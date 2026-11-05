@@ -66,18 +66,20 @@ import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
 import com.mrgnstr.harmony.core.designsystem.components.albumCoverKey
 import com.mrgnstr.harmony.core.designsystem.components.sharedCover
+import com.mrgnstr.harmony.core.designsystem.components.DetailTopBar
 import com.mrgnstr.harmony.core.designsystem.components.CoverFrame
 import com.mrgnstr.harmony.core.designsystem.components.HeaderGap
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
 import com.mrgnstr.harmony.core.designsystem.components.SectionHeading
 import com.mrgnstr.harmony.core.designsystem.components.ShelfTileWidth
-import com.mrgnstr.harmony.core.designsystem.components.coverPast
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
 import com.mrgnstr.harmony.core.designsystem.icons.DolbyLogo
 import com.mrgnstr.harmony.core.model.Album
+import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
+import com.mrgnstr.harmony.core.designsystem.components.AlbumGridPage
 import com.mrgnstr.harmony.core.model.FormatIcon
 import com.mrgnstr.harmony.core.model.Song
 import java.text.DateFormat
@@ -98,6 +100,7 @@ fun AlbumRoute(
     onBack: () -> Unit,
     onOpenAlbum: (Album) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenShelf: (AlbumReleaseShelf, Int?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: AlbumViewModel = hiltViewModel<AlbumViewModel, AlbumViewModel.Factory>(
         key = "album:$albumId:$title",
@@ -113,6 +116,8 @@ fun AlbumRoute(
     val density = LocalDensity.current
     val sides = LocalSideInsets.current
     val statusTop = WindowInsets.statusBars.getTop(density)
+    val barRowPx = with(density) { BarRow.toPx() }
+    val titleGapPx = with(density) { HeaderGap.toPx() }
 
     // Songs waiting for a playlist to be picked (a track, or the whole album).
     var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
@@ -141,16 +146,21 @@ fun AlbumRoute(
                     if (settled) {
                         trackList(state, viewModel, onOpenArtist) { playlistFor = it }
                         item(key = "info", contentType = "info") { InfoCard(state) }
-                        if (state.otherVersions.isNotEmpty()) shelf("versions", "Other Versions", state.otherVersions, null, onOpenAlbum)
+                        if (state.otherVersions.isNotEmpty()) shelf("versions", "Other Versions", state.otherVersions, { onOpenShelf(AlbumReleaseShelf.OtherVersions, state.accent) }, onOpenAlbum)
                         if (state.moreByArtist.isNotEmpty()) {
-                            shelf("more", "More by ${state.artist}", state.moreByArtist, { onOpenArtist(state.artists.first()) }, onOpenAlbum)
+                            shelf("more", "More by ${state.artist}", state.moreByArtist, { onOpenShelf(AlbumReleaseShelf.MoreByArtist, state.accent) }, onOpenAlbum)
                         }
                     }
                 }
             }
-            AlbumTopBar(
+            DetailTopBar(
                 title = state.title,
-                fade = { ((listState.coverPast(density.density, listState.layoutInfo.viewportSize.width) - TitleFadeStart) / TitleFadeLength).coerceIn(0f, 1f) },
+                fade = {
+                    // Start when the header title actually enters the toolbar, including on narrow screens and long titles.
+                    val header = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "header" }
+                    if (header != null) ((statusTop + barRowPx - header.offset - titleGapPx) / barRowPx).coerceIn(0f, 1f)
+                    else if (listState.firstVisibleItemIndex > 1) 1f else 0f
+                },
                 blur = blur,
                 statusTop = with(density) { statusTop.toDp() },
                 onBack = onBack,
@@ -192,37 +202,6 @@ fun AlbumRoute(
 private fun rememberTransitionSettled(): Boolean {
     val transition = LocalNavAnimatedContentScope.current.transition
     return transition.currentState == EnterExitState.Visible && transition.targetState == EnterExitState.Visible
-}
-
-// The bar's surface and title come in over the last stretch of the cover's fade.
-private const val TitleFadeStart = 0.55f
-private const val TitleFadeLength = 0.4f
-
-/** Transparent over the cover (plain icon buttons); as the cover fades the blurred surface and the album's title come in. */
-@Composable
-private fun AlbumTopBar(
-    title: String,
-    fade: () -> Float,
-    blur: com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState,
-    statusTop: Dp,
-    onBack: () -> Unit,
-    menu: @Composable (close: () -> Unit) -> Unit,
-) {
-    Box(Modifier.fillMaxWidth().height(statusTop + BarRow)) {
-        ChromeSurface(blur, RectangleShape, Modifier.matchParentSize().graphicsLayer { alpha = fade() }, container = MaterialTheme.colorScheme.surface)
-        Box(Modifier.padding(top = statusTop).height(BarRow).fillMaxWidth().padding(horizontal = 64.dp).graphicsLayer { alpha = fade() }, contentAlignment = Alignment.CenterStart) {
-            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Row(Modifier.padding(top = statusTop).height(BarRow).fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onBack) { SymbolIcon(Symbols.ArrowBack, "Back") }
-            Box(Modifier.weight(1f))
-            var open by remember { mutableStateOf(false) }
-            Box {
-                IconButton({ open = true }) { SymbolIcon(Symbols.MoreVert, "More") }
-                DropdownMenu(open, { open = false }) { menu { open = false } }
-            }
-        }
-    }
 }
 
 @Composable
@@ -413,4 +392,24 @@ private fun LazyListScope.shelf(key: String, heading: String, albums: List<Album
             }
         }
     }
+}
+
+@Composable
+fun AlbumShelfRoute(
+    albumId: Long, title: String, shelf: AlbumReleaseShelf, onBack: () -> Unit, onOpenAlbum: (Album) -> Unit,
+    viewModel: AlbumViewModel = hiltViewModel<AlbumViewModel, AlbumViewModel.Factory>(
+        key = "album:$albumId:$title:shelf:$shelf", creationCallback = { it.create(albumId, title) },
+    ),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    PageColorSource(state.accent?.let { ColorSource.Seed(it) })
+    val heading = when (shelf) {
+        AlbumReleaseShelf.OtherVersions -> "Other Versions"
+        AlbumReleaseShelf.MoreByArtist -> if (state.artist.isBlank()) "More by Artist" else "More by ${state.artist}"
+    }
+    val albums = when (shelf) {
+        AlbumReleaseShelf.OtherVersions -> state.otherVersions
+        AlbumReleaseShelf.MoreByArtist -> state.moreByArtist
+    }
+    AlbumGridPage(heading, title, albums, state.loaded, onBack, onOpenAlbum)
 }

@@ -187,3 +187,20 @@ private fun SortMenu(open: Boolean, onDismiss: () -> Unit, tab: LibraryTab, sort
         }
     }
 }
+
+/** Full collections linked by preview sections; reuse the Library tabs' existing grid/list and saved ordering. */
+@Composable
+fun LibraryAlbumsRoute(
+    onBack: () -> Unit, onOpenAlbum: (Album) -> Unit,
+    viewModel: LibraryViewModel = hiltViewModel(key = "library:expanded-albums"),
+) {
+    TopBarScaffold("Albums", onBack = onBack) { AlbumsTab(viewModel, onOpenAlbum) }
+}
+
+@Composable
+fun LibrarySongsRoute(
+    onBack: () -> Unit,
+    viewModel: LibraryViewModel = hiltViewModel(key = "library:expanded-songs"),
+) {
+    TopBarScaffold("Songs", onBack = onBack) { SongsTab(viewModel) }
+}

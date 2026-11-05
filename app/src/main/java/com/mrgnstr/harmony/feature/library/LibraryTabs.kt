@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.library
 
+import com.mrgnstr.harmony.core.designsystem.components.TileGrid
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,24 +48,6 @@ import java.io.File
 @Composable
 internal fun listPadding() = PaddingValues(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
 
-
-/**
- * A grid page: [columns] tiles across, headers spanning all of them, and a fast scroller over it. [labelOf] names an item index for
- * the scroller's bubble (null where the ordering is not alphabetical).
- */
-@Composable
-internal fun TileGrid(itemCount: Int, labelOf: (Int) -> String? = { null }, content: LazyGridScope.(columns: Int) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val columns = gridColumns(maxWidth)
-        val grid = rememberLazyGridState()
-        LazyVerticalGrid(
-            GridCells.Fixed(columns), Modifier.fillMaxSize(), grid, contentPadding = listPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) { content(columns) }
-        // The page box starts above the collapsed bar (it is slid up with it), so the track starts below the expanded height.
-        LazyGridFastScroller(grid, itemCount, labelOf, topInset = LocalTopBarInset.current + 8.dp, bottomInset = LocalBottomBarInset.current + 8.dp)
-    }
-}
 
 /** An empty tab: a spinner while the first scan is still running, otherwise [title] and [message]. */
 @Composable

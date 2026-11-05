@@ -74,6 +74,15 @@ class ArtworkColorStore @Inject constructor(
         extract(albumId, bitmap)
     }
 
+    private val imageAccents = android.util.LruCache<String, Int>(32)
+
+    /** Artist hero photos have timestamped paths, so a replacement naturally gets a fresh palette. */
+    suspend fun accentForImage(path: String): Int? = withContext(worker) {
+        imageAccents.get(path) ?: decodeFile(path)?.let { bitmap ->
+            extract(0, bitmap).primary.also { imageAccents.put(path, it) }
+        }
+    }
+
     /**
      * The page colour for a playlist, taken from its cover as shown: the custom image, the 2x2 collage of its four album covers,
      * or its single cover. Null when it has no art. Cheap (a few 64px decodes), so it is not stored.

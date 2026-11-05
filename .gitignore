@@ -34,7 +34,6 @@ google-services.json
 # Android Profiling
 *.hprof
 
-# Local design references and agent docs (not backed up)
+# Local design references and agent instructions
 REFERENCE SCREENSHOTS/
 /CLAUDE.md
-/docs/

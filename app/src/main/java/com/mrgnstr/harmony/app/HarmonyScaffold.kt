@@ -82,6 +82,13 @@ import com.mrgnstr.harmony.core.designsystem.theme.lerp
 import com.mrgnstr.harmony.core.designsystem.theme.rememberColorSourceRegistry
 import com.mrgnstr.harmony.core.device.VisualTier
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.feature.artist.ArtistReleasesRoute
+import com.mrgnstr.harmony.feature.album.AlbumShelfRoute
+import com.mrgnstr.harmony.feature.library.LibraryAlbumsRoute
+import com.mrgnstr.harmony.feature.library.LibrarySongsRoute
+import com.mrgnstr.harmony.feature.artist.ArtistRoute
+import com.mrgnstr.harmony.feature.artist.ArtistSongsRoute
+import com.mrgnstr.harmony.feature.artist.ArtistInfoRoute
 import com.mrgnstr.harmony.feature.album.AlbumRoute
 import com.mrgnstr.harmony.feature.gallery.GalleryRoute
 import com.mrgnstr.harmony.feature.home.HomeRoute
@@ -94,6 +101,20 @@ import com.mrgnstr.harmony.feature.settings.SettingsRoute
 
 /** A back stack entry, scoped to its tab: the same album can be open on two tabs with independent state. */
 private data class TabDestination(val tab: Tab, val destination: Dest)
+/** Expanded collections and artist child pages inherit a colour before their ViewModel or PageColorSource has run, including after restoration. */
+private fun TabDestination.initialColorSource(): ColorSource {
+    val accent = when (val dest = destination) {
+        is Dest.ArtistInfo -> dest.accent
+        is Dest.ArtistSongs -> dest.accent
+        is Dest.ArtistReleases -> dest.accent
+        is Dest.AlbumShelf -> dest.accent
+        is Dest.LibraryAlbums -> dest.accent
+        is Dest.LibrarySongs -> dest.accent
+        else -> null
+    }
+    return accent?.let { ColorSource.Seed(it) } ?: ColorSource.Wallpaper
+}
+
 private const val TabMetadata = "harmony.tab"
 private const val PrebuildDelayMs = 1500L
 private const val PrebuildGapMs = 400L
@@ -131,9 +152,9 @@ private fun ChromeTheme(nav: TabNavigator, schemes: SchemeFactory, dark: Boolean
     val stack = nav.backStack
     val top = TabDestination(nav.current, stack.last())
     val below = stack.getOrNull(stack.size - 2)?.let { TabDestination(nav.current, it) }
-    val topScheme = schemes.scheme(registry?.sourceOf(top) ?: ColorSource.Wallpaper, dark)
+    val topScheme = schemes.scheme(registry?.sourceOf(top, top.initialColorSource()) ?: top.initialColorSource(), dark)
     val gesture = back != null && below != null
-    val target = if (gesture) lerp(topScheme, schemes.scheme(registry?.sourceOf(below) ?: ColorSource.Wallpaper, dark), back!!) else topScheme
+    val target = if (gesture) lerp(topScheme, schemes.scheme(registry?.sourceOf(below, below.initialColorSource()) ?: below.initialColorSource(), dark), back!!) else topScheme
     val scheme = animateColorScheme(target, snap = gesture, lowTier = tier == VisualTier.LOW, steps = ChromeBlendSteps)
     HarmonyTheme(scheme, tier, LocalChromeBlurMode.current, LocalCoverBlurMode.current, content)
 }
@@ -196,15 +217,39 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                 }
             }
             entry<Dest.Settings> { SettingsRoute(onBack = back) }
-            entry<Dest.Gallery> { GalleryRoute(onBack = back) }
+            entry<Dest.Gallery> {
+                GalleryRoute(onBack = back,
+                    onOpenAlbums = { nav.push(Dest.LibraryAlbums(it)) },
+                    onOpenSongs = { nav.push(Dest.LibrarySongs(it)) },
+                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+            }
             entry<Dest.Album>(metadata = mapOf(CoverPageMetadata to true)) { album ->
                 AlbumRoute(
                     album.albumId, album.title, onBack = back,
                     onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }, onOpenArtist = { nav.push(Dest.Artist(it)) },
+                    onOpenShelf = { shelf, accent -> nav.push(Dest.AlbumShelf(album.albumId, album.title, shelf, accent)) },
                 )
             }
-            // Artist, Genre and Playlist pages land with their milestones (M7 and later).
-            entry<Dest.Artist> { SettingsRoute(onBack = back) }
+            entry<Dest.Artist> { artist ->
+                ArtistRoute(artist.name, onBack = back,
+                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) },
+                    onAllSongs = { accent -> nav.push(Dest.ArtistSongs(artist.name, accent)) },
+                    onInfo = { accent -> nav.push(Dest.ArtistInfo(artist.name, accent)) },
+                    onOpenShelf = { shelf, accent -> nav.push(Dest.ArtistReleases(artist.name, shelf, accent)) })
+            }
+            entry<Dest.ArtistSongs> { ArtistSongsRoute(it.name, onBack = back) }
+            entry<Dest.ArtistInfo> { ArtistInfoRoute(it.name, onBack = back) }
+            entry<Dest.ArtistReleases> { collection ->
+                ArtistReleasesRoute(collection.name, collection.shelf, onBack = back,
+                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+            }
+            entry<Dest.AlbumShelf> { collection ->
+                AlbumShelfRoute(collection.albumId, collection.title, collection.shelf, onBack = back,
+                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+            }
+            entry<Dest.LibraryAlbums> { LibraryAlbumsRoute(onBack = back, onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }) }
+            entry<Dest.LibrarySongs> { LibrarySongsRoute(onBack = back) }
+            // Genre and Playlist pages land with their milestones.
             entry<Dest.Genre> { SettingsRoute(onBack = back) }
             entry<Dest.Playlist> { SettingsRoute(onBack = back) }
         }
@@ -288,9 +333,9 @@ private fun SurfaceFill() = Box(Modifier.fillMaxSize().background(MaterialTheme.
  * recomposed every colour reader of both pages every frame; only the chrome (tab bar, mini player) blends, in [ChromeTheme].
  */
 @Composable
-private fun EntryTheme(key: Any, schemes: SchemeFactory, dark: Boolean, tier: VisualTier, content: @Composable () -> Unit) {
+private fun EntryTheme(key: TabDestination, schemes: SchemeFactory, dark: Boolean, tier: VisualTier, content: @Composable () -> Unit) {
     val registry = LocalColorSourceRegistry.current
-    val target = schemes.scheme(registry?.sourceOf(key) ?: ColorSource.Wallpaper, dark)
+    val target = schemes.scheme(registry?.sourceOf(key, key.initialColorSource()) ?: key.initialColorSource(), dark)
     // A page that is still coming in takes its colours at once: it is fading in anyway, and every blend step recomposes the whole page.
     val entering by produceState(true) { delay(EnterSnapMs); value = false }
     val scheme = animateColorScheme(target, snap = entering, lowTier = tier == VisualTier.LOW)

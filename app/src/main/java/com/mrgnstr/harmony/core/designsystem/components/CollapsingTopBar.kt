@@ -47,13 +47,13 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import kotlin.math.roundToInt
 
 private val BarRow = 64.dp
-// Collapsed, the row shrinks to just the icon buttons' height, which lifts the tabs under it.
-private val CollapsedRow = 48.dp
+// Compact rows match the 64 dp Artist/Album detail bar.
 private val TitleExtra = 44.dp
 private val SubtitleExtra = 20.dp
 private val TitleBottomGap = 4.dp
 private val TitleStart = 16.dp
 private val TitleStartWithBack = 56.dp
+private val SubtitleGap = 4.dp
 
 /**
  * The top bar every page uses: a large title that rises into the bar's row and scales down to the small title as the content
@@ -79,18 +79,20 @@ fun TopBarScaffold(
     val density = LocalDensity.current
     val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
     val rowPx = with(density) { BarRow.toPx() }
-    val shrinkPx = with(density) { (BarRow - CollapsedRow).toPx() }
-    val extraPx = with(density) { (TitleExtra + if (subtitle != null) SubtitleExtra else 0.dp).toPx() }
+    var titleHeight by remember { mutableFloatStateOf(0f) }
+    var subtitleHeight by remember { mutableFloatStateOf(0f) }
+    // Reserve measured text heights as well as the normal minimums, so larger system fonts keep their spacing.
+    val titleExtraPx = maxOf(with(density) { TitleExtra.toPx() }, titleHeight + with(density) { TitleBottomGap.toPx() })
+    val subtitleRoom = if (subtitle != null) maxOf(with(density) { SubtitleExtra.toPx() }, subtitleHeight + with(density) { SubtitleGap.toPx() }) else 0f
+    val extraPx = titleExtraPx + subtitleRoom
     val tabsPx = if (tabs != null) with(density) { TabsHeight.toPx() } else 0f
     // Collapsing is the scroll behaviour's offset (0 expanded .. -distance collapsed); the layers below only read it when drawing or placing.
-    val distance = extraPx + shrinkPx
+    val distance = extraPx
     LaunchedEffect(distance) { scroll.state.heightOffsetLimit = -distance }
     val collapsed: () -> Float = { (-scroll.state.heightOffset / distance).coerceIn(0f, 1f) }
     val pageBlur = rememberChromeBlurState()
-    var titleHeight by remember { mutableFloatStateOf(0f) }
     val largeStyle = MaterialTheme.typography.headlineLarge
     val titleScale = MaterialTheme.typography.titleLarge.fontSize.value / largeStyle.fontSize.value
-    val titleShift = with(density) { (if (onBack != null) TitleStartWithBack - TitleStart else 0.dp).toPx() }
     val expandedInset: Dp = with(density) { (statusTop + rowPx + extraPx + tabsPx).toDp() }
 
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).nestedScroll(scroll.nestedScrollConnection)) {
@@ -126,9 +128,17 @@ fun TopBarScaffold(
                         Text(
                             subtitle,
                             Modifier
-                                .padding(start = TitleStart, bottom = TitleBottomGap + with(density) { tabsPx.toDp() })
-                                .align(Alignment.BottomStart)
-                                .graphicsLayer { alpha = 1f - collapsed() },
+                                .padding(horizontal = TitleStart)
+                                .onSizeChanged { subtitleHeight = it.height.toFloat() }
+                                .graphicsLayer {
+                                    val f = collapsed()
+                                    val scale = lerp(1f, titleScale, f)
+                                    val expandedTop = statusTop + rowPx + extraPx - subtitleRoom - titleHeight - TitleBottomGap.toPx()
+                                    val collapsedTop = statusTop + (rowPx - titleHeight * titleScale) / 2f
+                                    translationY = lerp(expandedTop, collapsedTop, f) + titleHeight * scale + SubtitleGap.toPx()
+                                    // Keep it below the moving title, then finish fading before that title reaches the row.
+                                    alpha = (1f - f * 2f).coerceIn(0f, 1f)
+                                },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -139,17 +149,17 @@ fun TopBarScaffold(
                     Text(
                         title,
                         Modifier
-                            .padding(start = TitleStart, end = 112.dp)
+                            .padding(horizontal = TitleStart)
                             .onSizeChanged { titleHeight = it.height.toFloat() }
                             .graphicsLayer {
                                 val f = collapsed()
                                 val s = lerp(1f, titleScale, f)
                                 transformOrigin = TransformOrigin(0f, 0f)
                                 scaleX = s; scaleY = s
-                                val subtitleRoom = if (subtitle != null) SubtitleExtra.toPx() else 0f
                                 val expandedTop = statusTop + rowPx + extraPx - subtitleRoom - titleHeight - TitleBottomGap.toPx()
-                                val collapsedTop = statusTop + (rowPx - shrinkPx - titleHeight * titleScale) / 2f
-                                translationX = titleShift * f
+                                val collapsedTop = statusTop + (rowPx - titleHeight * titleScale) / 2f
+                                val compactStart = if (onBack != null) TitleStartWithBack else TitleStart
+                                translationX = (compactStart - TitleStart).toPx() * f
                                 translationY = lerp(expandedTop, collapsedTop, f)
                             },
                         style = largeStyle,
@@ -159,15 +169,13 @@ fun TopBarScaffold(
                     if (onBack != null) {
                         IconButton(
                             onClick = onBack,
-                            Modifier.padding(top = with(density) { statusTop.toDp() }, start = 4.dp).height(BarRow)
-                                .graphicsLayer { translationY = -shrinkPx / 2f * collapsed() },
+                            Modifier.padding(top = with(density) { statusTop.toDp() }, start = 4.dp).height(BarRow),
                         ) {
                             SymbolIcon(Symbols.ArrowBack, "Back")
                         }
                     }
                     Row(
-                        Modifier.align(Alignment.TopEnd).padding(top = with(density) { statusTop.toDp() }, end = 4.dp).height(BarRow)
-                            .graphicsLayer { translationY = -shrinkPx / 2f * collapsed() },
+                        Modifier.align(Alignment.TopEnd).padding(top = with(density) { statusTop.toDp() }, end = 4.dp).height(BarRow),
                         verticalAlignment = Alignment.CenterVertically,
                         content = actions,
                     )

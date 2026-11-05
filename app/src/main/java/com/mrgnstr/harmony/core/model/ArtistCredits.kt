@@ -28,3 +28,10 @@ class ArtistIndex(credits: Collection<String>) {
         fun of(songs: List<Song>) = ArtistIndex(songs.flatMapTo(HashSet()) { listOf(it.albumArtist, it.artist) }.filter { it.isNotBlank() })
     }
 }
+
+/** Explicit guest credits in the artist field or a parenthesised/bracketed title credit. */
+fun Song.featuresArtist(name: String, index: ArtistIndex): Boolean {
+    if (index.credits(artist, name)) return true
+    val guestCredits = Regex("""(?i)[(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^)|\]]+)[)\]]""")
+    return guestCredits.findAll(title).any { match -> index.credits(match.groupValues[1], name) }
+}

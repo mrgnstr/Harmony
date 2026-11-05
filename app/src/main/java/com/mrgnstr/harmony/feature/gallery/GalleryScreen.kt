@@ -109,7 +109,13 @@ private val GallerySymbols = listOf(
 /** Debug page for M2: page colour sources, components, symbols and motion primitives. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun GalleryRoute(onBack: () -> Unit, viewModel: GalleryViewModel = hiltViewModel()) {
+fun GalleryRoute(
+    onBack: () -> Unit,
+    onOpenAlbums: (Int?) -> Unit,
+    onOpenSongs: (Int?) -> Unit,
+    onOpenAlbum: (Album) -> Unit,
+    viewModel: GalleryViewModel = hiltViewModel(),
+) {
     var seedIndex by rememberSaveable { mutableStateOf(1) }
     PageColorSource(Seeds[seedIndex].second?.let { ColorSource.Seed(it.toArgb()) } ?: ColorSource.Wallpaper)
     val albums by viewModel.albums.collectAsStateWithLifecycle()
@@ -136,13 +142,13 @@ fun GalleryRoute(onBack: () -> Unit, viewModel: GalleryViewModel = hiltViewModel
         }
         item { SectionHeading("Buttons") }
         item { PlayShuffleButtons(onPlay = { viewModel.play(songs, 0) }, onShuffle = { viewModel.play(songs.shuffled(), 0) }) }
-        item { SectionHeading("Albums", onMore = {}) }
+        item { SectionHeading("Albums", onMore = { onOpenAlbums(Seeds[seedIndex].second?.toArgb()) }) }
         item {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(albums, key = { "${it.id}:${it.title}" }) { AlbumTile(it, onClick = {}, Modifier.width(ShelfTileWidth)) }
+                items(albums, key = { "${it.id}:${it.title}" }) { AlbumTile(it, onClick = { onOpenAlbum(it) }, Modifier.width(ShelfTileWidth)) }
             }
         }
-        item { SectionHeading("Songs") }
+        item { SectionHeading("Songs", onMore = { onOpenSongs(Seeds[seedIndex].second?.toArgb()) }) }
         items(songs.size) { i -> SongRow(songs[i], onClick = { viewModel.play(songs, i) }, onMore = {}) }
         item { SectionHeading("Material Symbols") }
         item { SymbolsDemo() }

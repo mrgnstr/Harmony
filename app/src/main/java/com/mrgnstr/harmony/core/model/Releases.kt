@@ -98,3 +98,10 @@ fun topSongs(songs: List<Song>, releases: List<Album>, counts: Map<Long, Int>, l
     }
     return out
 }
+
+/** The release previews that can be expanded without changing their filtering or ordering. */
+enum class ArtistReleaseShelf(val title: String) {
+    Albums("Albums"), Singles("Singles & EPs"), FeaturedOn("Featured On"),
+}
+
+enum class AlbumReleaseShelf { OtherVersions, MoreByArtist }

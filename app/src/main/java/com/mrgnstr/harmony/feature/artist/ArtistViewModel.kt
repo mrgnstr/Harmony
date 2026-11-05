@@ -1,0 +1,87 @@
+package com.mrgnstr.harmony.feature.artist
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
+import com.mrgnstr.harmony.core.data.*
+import com.mrgnstr.harmony.core.model.*
+import com.mrgnstr.harmony.core.playback.PlayerConnection
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+
+internal data class ArtistUiState(
+    val name: String,
+    val loaded: Boolean = false,
+    val songs: List<Song> = emptyList(),
+    val rankedSongs: List<Song> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val singles: List<Album> = emptyList(),
+    val featuredOn: List<Album> = emptyList(),
+    val latest: Album? = null,
+    val hero: Album? = null,
+    val accent: Int? = null,
+    val imagePath: String? = null,
+    val imageRatio: Float = 1f,
+    val logoPath: String? = null,
+    val playingId: Long? = null,
+    val favourite: Boolean = false,
+)
+
+@HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
+class ArtistViewModel @AssistedInject constructor(
+    @Assisted private val name: String,
+    repository: LibraryRepository,
+    history: HistoryRepository,
+    private val images: ArtistImageStore,
+    private val favourites: FavouritesRepository,
+    private val player: PlayerConnection,
+    colors: ArtworkColorStore,
+) : ViewModel() {
+    @AssistedFactory interface Factory { fun create(name: String): ArtistViewModel }
+
+    private val library = combine(repository.songs, repository.albums, history.playCounts) { songs, albums, counts ->
+        val index = ArtistIndex.of(songs)
+        val own = albums.filter { index.credits(it.artist, name) }
+        val mine = songs.filter { index.credits(it.owner, name) }
+            .sortedWith(compareByDescending<Song> { it.year }.thenBy { it.album }.thenBy { it.discNumber }.thenBy { it.trackNumber })
+        val guests = songs.filter { !index.credits(it.owner, name) && it.featuresArtist(name, index) }
+        val discography = discographyOf(own, guests, albums)
+        ArtistUiState(
+            name = name, loaded = true, songs = mine,
+            rankedSongs = topSongs(mine, own, counts, limit = mine.size),
+            albums = discography.albums, singles = discography.singles, featuredOn = discography.featuredOn,
+            latest = own.sortedWith(NewestFirst).mainEditions().firstOrNull(), hero = heroOf(own),
+        )
+    }.flowOn(Dispatchers.Default).shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val accent = combine(library.map { it.hero }, images.images) { hero, photos ->
+        hero to photos[name]?.path
+    }.distinctUntilChanged().mapLatest { (hero, customImage) ->
+        if (customImage != null) colors.accentForImage(customImage)
+        else hero?.let { colors.paletteFor(it.artSongId, it.id)?.takeIf { p -> p.hasArt }?.primary }
+    }
+    private val art = combine(images.images, images.logos) { photos, logos -> photos[name] to logos[name] }
+    internal val state = combine(library, accent, art, player.state, favourites.artists) { base, accent, art, playback, favourites ->
+        base.copy(accent = accent, imagePath = art.first?.path, imageRatio = art.first?.ratio ?: 1f,
+            logoPath = art.second?.path, playingId = playback.mediaId?.toLongOrNull(), favourite = name in favourites)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArtistUiState(name))
+
+    val imageError = MutableStateFlow<String?>(null)
+    fun play(songs: List<Song>, index: Int = 0) { if (songs.isNotEmpty()) player.playQueue(songs, index, source = name) }
+    fun shuffle() = play(state.value.songs.shuffled())
+    fun playRelease(album: Album) = play(state.value.songs.filter { it.albumId == album.id && it.album == album.title })
+    fun playNext(song: Song) = player.playNext(listOf(song))
+    fun addToQueue(song: Song) = player.playLast(listOf(song))
+    fun toggleFavourite() { viewModelScope.launch { favourites.toggleArtist(name) } }
+    fun setImage(uri: String, logo: Boolean = false) { viewModelScope.launch {
+        val saved = if (logo) images.setLogo(name, uri) else images.set(name, uri)
+        if (!saved) imageError.value = "This image could not be read. Try another image."
+    } }
+    fun clearImage(logo: Boolean = false) { viewModelScope.launch { if (logo) images.clearLogo(name) else images.clear(name) } }
+}

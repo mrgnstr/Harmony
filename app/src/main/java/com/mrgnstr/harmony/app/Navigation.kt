@@ -1,5 +1,7 @@
 package com.mrgnstr.harmony.app
 
+import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
+import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -22,6 +24,12 @@ sealed interface Dest {
     data class Root(val tab: Tab) : Dest
     data class Album(val albumId: Long, val title: String) : Dest
     data class Artist(val name: String) : Dest
+    data class ArtistSongs(val name: String, val accent: Int? = null) : Dest
+    data class ArtistInfo(val name: String, val accent: Int? = null) : Dest
+    data class ArtistReleases(val name: String, val shelf: ArtistReleaseShelf, val accent: Int? = null) : Dest
+    data class AlbumShelf(val albumId: Long, val title: String, val shelf: AlbumReleaseShelf, val accent: Int? = null) : Dest
+    data class LibraryAlbums(val accent: Int? = null) : Dest
+    data class LibrarySongs(val accent: Int? = null) : Dest
     data class Genre(val name: String) : Dest
     data class Playlist(val playlistId: Long) : Dest
     data object Settings : Dest
@@ -76,6 +84,12 @@ private fun Dest.encode(): List<Any> = when (this) {
     is Dest.Root -> listOf("root", tab.name)
     is Dest.Album -> listOf("album", albumId, title)
     is Dest.Artist -> listOf("artist", name)
+    is Dest.ArtistSongs -> listOf("artistSongs", name) + listOfNotNull(accent)
+    is Dest.ArtistInfo -> listOf("artistInfo", name) + listOfNotNull(accent)
+    is Dest.ArtistReleases -> listOf("artistReleases", name, shelf.name) + listOfNotNull(accent)
+    is Dest.AlbumShelf -> listOf("albumShelf", albumId, title, shelf.name) + listOfNotNull(accent)
+    is Dest.LibraryAlbums -> listOf("libraryAlbums") + listOfNotNull(accent)
+    is Dest.LibrarySongs -> listOf("librarySongs") + listOfNotNull(accent)
     is Dest.Genre -> listOf("genre", name)
     is Dest.Playlist -> listOf("playlist", playlistId)
     Dest.Settings -> listOf("settings")
@@ -87,6 +101,12 @@ private fun decodeDest(parts: List<Any>): Dest? = runCatching {
         "root" -> Dest.Root(Tab.valueOf(parts[1] as String))
         "album" -> Dest.Album(parts[1] as Long, parts[2] as String)
         "artist" -> Dest.Artist(parts[1] as String)
+        "artistSongs" -> Dest.ArtistSongs(parts[1] as String, parts.getOrNull(2) as? Int)
+        "artistInfo" -> Dest.ArtistInfo(parts[1] as String, parts.getOrNull(2) as? Int)
+        "artistReleases" -> Dest.ArtistReleases(parts[1] as String, ArtistReleaseShelf.valueOf(parts[2] as String), parts.getOrNull(3) as? Int)
+        "albumShelf" -> Dest.AlbumShelf(parts[1] as Long, parts[2] as String, AlbumReleaseShelf.valueOf(parts[3] as String), parts.getOrNull(4) as? Int)
+        "libraryAlbums" -> Dest.LibraryAlbums(parts.getOrNull(1) as? Int)
+        "librarySongs" -> Dest.LibrarySongs(parts.getOrNull(1) as? Int)
         "genre" -> Dest.Genre(parts[1] as String)
         "playlist" -> Dest.Playlist(parts[1] as Long)
         "settings" -> Dest.Settings

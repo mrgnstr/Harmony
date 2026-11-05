@@ -190,10 +190,10 @@ fun SectionHeading(text: String, modifier: Modifier = Modifier, onMore: (() -> U
         modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 8.dp).heightIn(min = 40.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text, Modifier.weight(1f).then(if (onMore != null) Modifier.clickable(onClick = onMore) else Modifier), style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (onMore != null) {
             FilledTonalIconButton(onClick = onMore, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(36.dp)) {
-                SymbolIcon(Symbols.ChevronRight, "See all", size = 20.dp)
+                SymbolIcon(Symbols.ChevronRight, "See all $text", size = 20.dp)
             }
         }
     }
