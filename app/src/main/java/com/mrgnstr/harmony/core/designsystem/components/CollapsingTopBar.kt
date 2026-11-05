@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarCollapse
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
+import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
 import com.mrgnstr.harmony.core.designsystem.blur.chromeSource
 import com.mrgnstr.harmony.core.designsystem.blur.rememberChromeBlurState
@@ -73,6 +74,8 @@ fun TopBarScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     tabs: (@Composable () -> Unit)? = null,
+    floatingBarHeight: Dp = 0.dp,
+    floatingBar: (@Composable (ChromeBlurState) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -86,6 +89,7 @@ fun TopBarScaffold(
     val subtitleRoom = if (subtitle != null) maxOf(with(density) { SubtitleExtra.toPx() }, subtitleHeight + with(density) { SubtitleGap.toPx() }) else 0f
     val extraPx = titleExtraPx + subtitleRoom
     val tabsPx = if (tabs != null) with(density) { TabsHeight.toPx() } else 0f
+    val floatingPx = if (floatingBar != null) with(density) { floatingBarHeight.toPx() } else 0f
     // Collapsing is the scroll behaviour's offset (0 expanded .. -distance collapsed); the layers below only read it when drawing or placing.
     val distance = extraPx
     LaunchedEffect(distance) { scroll.state.heightOffsetLimit = -distance }
@@ -93,7 +97,7 @@ fun TopBarScaffold(
     val pageBlur = rememberChromeBlurState()
     val largeStyle = MaterialTheme.typography.headlineLarge
     val titleScale = MaterialTheme.typography.titleLarge.fontSize.value / largeStyle.fontSize.value
-    val expandedInset: Dp = with(density) { (statusTop + rowPx + extraPx + tabsPx).toDp() }
+    val expandedInset: Dp = with(density) { (statusTop + rowPx + extraPx + tabsPx + floatingPx).toDp() }
 
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).nestedScroll(scroll.nestedScrollConnection)) {
         // Scaffold used to set this; without it every Text on the page falls back to the light theme's black.
@@ -180,6 +184,21 @@ fun TopBarScaffold(
                         content = actions,
                     )
                     if (tabs != null) Box(Modifier.align(Alignment.BottomStart)) { tabs() }
+                }
+            }
+        }
+
+        if (floatingBar != null) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                Box(
+                    Modifier.fillMaxWidth().layout { measurable, c ->
+                        val barH = (statusTop + rowPx + extraPx + tabsPx + scroll.state.heightOffset.coerceIn(-distance, 0f)).roundToInt()
+                        val h = floatingPx.roundToInt()
+                        val placeable = measurable.measure(Constraints.fixed(c.maxWidth, h))
+                        layout(c.maxWidth, barH + h) { placeable.place(0, barH) }
+                    },
+                ) {
+                    floatingBar(pageBlur)
                 }
             }
         }

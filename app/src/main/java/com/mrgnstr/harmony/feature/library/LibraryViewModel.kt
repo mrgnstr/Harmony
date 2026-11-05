@@ -11,6 +11,7 @@ import com.mrgnstr.harmony.core.datastore.SettingsStore
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.ArtRef
 import com.mrgnstr.harmony.core.model.Artist
+import com.mrgnstr.harmony.core.model.GenreCard
 import com.mrgnstr.harmony.core.model.Playlist
 import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.SortKey
@@ -56,9 +57,6 @@ enum class LibraryTab(val label: String, val keys: List<SortKey>, val default: L
     ),
     Genres("Genres", listOf(SortKey.Title, SortKey.TrackCount), LibrarySort(SortKey.Title)),
 }
-
-/** A genre with the covers of its first albums, for its card. */
-class GenreCard(val name: String, val songCount: Int, val art: List<ArtRef>)
 
 /** How many albums the Recently Added tab shows. */
 private const val RecentlyAddedCount = 60

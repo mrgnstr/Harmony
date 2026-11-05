@@ -92,7 +92,10 @@ import com.mrgnstr.harmony.feature.artist.ArtistInfoRoute
 import com.mrgnstr.harmony.feature.album.AlbumRoute
 import com.mrgnstr.harmony.feature.gallery.GalleryRoute
 import com.mrgnstr.harmony.feature.home.HomeRoute
+import com.mrgnstr.harmony.feature.home.HomeShelfRoute
+import com.mrgnstr.harmony.feature.library.GenreRoute
 import com.mrgnstr.harmony.feature.library.LibraryRoute
+import com.mrgnstr.harmony.feature.library.PlaylistRoute
 import com.mrgnstr.harmony.feature.onboarding.NotificationPermissionEffect
 import com.mrgnstr.harmony.feature.onboarding.OnboardingScreen
 import com.mrgnstr.harmony.feature.onboarding.rememberAudioPermissionState
@@ -203,36 +206,53 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     val entries = remember(nav) {
         val openSettings = { nav.push(Dest.Settings); Unit }
         val openGallery = { nav.push(Dest.Gallery); Unit }
+        val openAlbum: (com.mrgnstr.harmony.core.model.Album) -> Unit = { nav.push(Dest.Album(it.id, it.title)) }
+        val openArtist: (String) -> Unit = { nav.push(Dest.Artist(it)) }
+        val openPlaylist: (Long) -> Unit = { nav.push(Dest.Playlist(it)) }
+        val openGenre: (String) -> Unit = { nav.push(Dest.Genre(it)) }
         val back = { nav.pop(); Unit }
         entryProvider<Dest> {
             entry<Dest.Root> { root ->
                 when (root.tab) {
-                    Tab.Home -> HomeRoute(onOpenSettings = openSettings, onOpenGallery = openGallery)
+                    Tab.Home -> HomeRoute(
+                        onOpenSettings = openSettings,
+                        onOpenAlbum = openAlbum,
+                        onOpenArtist = openArtist,
+                        onOpenPlaylist = openPlaylist,
+                        onOpenShelf = { nav.push(Dest.HomeShelfDest(it)) },
+                    )
                     Tab.Library -> LibraryRoute(
                         onOpenSettings = openSettings, onOpenGallery = openGallery,
-                        onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }, onOpenArtist = { nav.push(Dest.Artist(it.name)) },
-                        onOpenPlaylist = { nav.push(Dest.Playlist(it)) }, onOpenGenre = { nav.push(Dest.Genre(it)) },
+                        onOpenAlbum = openAlbum, onOpenArtist = { openArtist(it.name) },
+                        onOpenPlaylist = openPlaylist, onOpenGenre = openGenre,
                     )
-                    Tab.Search -> SearchRoute()
+                    Tab.Search -> SearchRoute(
+                        onOpenSettings = openSettings,
+                        onOpenAlbum = openAlbum,
+                        onOpenArtist = openArtist,
+                        onOpenPlaylist = openPlaylist,
+                        onOpenGenre = openGenre,
+                        active = nav.current == Tab.Search,
+                    )
                 }
             }
-            entry<Dest.Settings> { SettingsRoute(onBack = back) }
+            entry<Dest.Settings> { SettingsRoute(onBack = back, onOpenGallery = openGallery) }
             entry<Dest.Gallery> {
                 GalleryRoute(onBack = back,
                     onOpenAlbums = { nav.push(Dest.LibraryAlbums(it)) },
                     onOpenSongs = { nav.push(Dest.LibrarySongs(it)) },
-                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+                    onOpenAlbum = openAlbum)
             }
             entry<Dest.Album>(metadata = mapOf(CoverPageMetadata to true)) { album ->
                 AlbumRoute(
                     album.albumId, album.title, onBack = back,
-                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }, onOpenArtist = { nav.push(Dest.Artist(it)) },
+                    onOpenAlbum = openAlbum, onOpenArtist = openArtist,
                     onOpenShelf = { shelf, accent -> nav.push(Dest.AlbumShelf(album.albumId, album.title, shelf, accent)) },
                 )
             }
             entry<Dest.Artist> { artist ->
                 ArtistRoute(artist.name, onBack = back,
-                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) },
+                    onOpenAlbum = openAlbum,
                     onAllSongs = { accent -> nav.push(Dest.ArtistSongs(artist.name, accent)) },
                     onInfo = { accent -> nav.push(Dest.ArtistInfo(artist.name, accent)) },
                     onOpenShelf = { shelf, accent -> nav.push(Dest.ArtistReleases(artist.name, shelf, accent)) })
@@ -241,17 +261,19 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
             entry<Dest.ArtistInfo> { ArtistInfoRoute(it.name, onBack = back) }
             entry<Dest.ArtistReleases> { collection ->
                 ArtistReleasesRoute(collection.name, collection.shelf, onBack = back,
-                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+                    onOpenAlbum = openAlbum)
             }
             entry<Dest.AlbumShelf> { collection ->
                 AlbumShelfRoute(collection.albumId, collection.title, collection.shelf, onBack = back,
-                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) })
+                    onOpenAlbum = openAlbum)
             }
-            entry<Dest.LibraryAlbums> { LibraryAlbumsRoute(onBack = back, onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }) }
+            entry<Dest.HomeShelfDest> { collection ->
+                HomeShelfRoute(collection.shelf, onBack = back, onOpenAlbum = openAlbum)
+            }
+            entry<Dest.LibraryAlbums> { LibraryAlbumsRoute(onBack = back, onOpenAlbum = openAlbum) }
             entry<Dest.LibrarySongs> { LibrarySongsRoute(onBack = back) }
-            // Genre and Playlist pages land with their milestones.
-            entry<Dest.Genre> { SettingsRoute(onBack = back) }
-            entry<Dest.Playlist> { SettingsRoute(onBack = back) }
+            entry<Dest.Genre> { GenreRoute(it.name, onBack = back, onOpenAlbum = openAlbum) }
+            entry<Dest.Playlist> { PlaylistRoute(it.playlistId, onBack = back, onOpenAlbum = openAlbum, onOpenArtist = openArtist) }
         }
     }
     // Tab in the entry's identity and metadata (for the tab slide); the entry key is what pages claim colours under.

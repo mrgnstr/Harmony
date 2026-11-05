@@ -25,3 +25,7 @@ data class Artist(
 )
 
 data class Genre(val name: String, val songCount: Int)
+
+/** A genre with the covers of its first albums, for its card in Library and Search. */
+data class GenreCard(val name: String, val songCount: Int, val art: List<ArtRef>)
+

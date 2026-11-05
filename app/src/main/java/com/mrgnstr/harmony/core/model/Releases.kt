@@ -105,3 +105,9 @@ enum class ArtistReleaseShelf(val title: String) {
 }
 
 enum class AlbumReleaseShelf { OtherVersions, MoreByArtist }
+
+enum class HomeShelf(val title: String) {
+    RecentlyPlayed("Recently Played"),
+    FavouriteAlbums("Favourite Albums"),
+}
+

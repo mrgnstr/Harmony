@@ -22,6 +22,10 @@ class SearchRankingTest {
         assertTrue(SearchRanking.score("Milk Miracle", "miracle milk") > SearchRanking.score("Collection", "miracle milk"))
         assertEquals(listOf(SearchCategory.Artists, SearchCategory.Albums, SearchCategory.Songs),
             SearchRanking.categories("Same", listOf("Same"), listOf("Same"), listOf("Same")))
+        assertEquals(listOf(SearchCategory.Artists, SearchCategory.Albums, SearchCategory.Songs, SearchCategory.Playlists),
+            SearchRanking.categories("Same", listOf("Same"), listOf("Same"), listOf("Same"), listOf("Same")))
+        assertEquals(SearchCategory.Playlists,
+            SearchRanking.categories("Road Trip", listOf("Other"), emptyList(), emptyList(), listOf("Road Trip")).first())
         assertTrue(SearchRanking.categories("", emptyList(), emptyList(), emptyList()).isEmpty())
     }
 }

@@ -2,6 +2,7 @@ package com.mrgnstr.harmony.app
 
 import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
 import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
+import com.mrgnstr.harmony.core.model.HomeShelf
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -40,6 +41,8 @@ class ArtistNavigationTest {
         val destinations = listOf(
             Dest.ArtistReleases("A", ArtistReleaseShelf.FeaturedOn),
             Dest.AlbumShelf(7L, "Record", AlbumReleaseShelf.OtherVersions),
+            Dest.HomeShelfDest(HomeShelf.RecentlyPlayed),
+            Dest.HomeShelfDest(HomeShelf.FavouriteAlbums),
             Dest.LibraryAlbums(), Dest.LibrarySongs(),
         )
         for (destination in destinations) {

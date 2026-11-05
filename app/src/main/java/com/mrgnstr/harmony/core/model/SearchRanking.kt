@@ -1,6 +1,6 @@
 package com.mrgnstr.harmony.core.model
 
-enum class SearchCategory { Songs, Albums, Artists }
+enum class SearchCategory { Songs, Albums, Artists, Playlists }
 
 /** Direct names/titles outrank matches inherited through an artist or album credit. */
 object SearchRanking {
@@ -16,10 +16,21 @@ object SearchRanking {
         }
     }
 
-    fun categories(query: String, songTitles: List<String>, albumTitles: List<String>, artistNames: List<String>): List<SearchCategory> {
-        val names = mapOf(SearchCategory.Songs to songTitles, SearchCategory.Albums to albumTitles, SearchCategory.Artists to artistNames)
-        // Prefer the entity itself on equal-strength matches: artist, then album, then song.
-        return listOf(SearchCategory.Artists, SearchCategory.Albums, SearchCategory.Songs)
+    fun categories(
+        query: String,
+        songTitles: List<String>,
+        albumTitles: List<String>,
+        artistNames: List<String>,
+        playlistNames: List<String> = emptyList(),
+    ): List<SearchCategory> {
+        val names = mapOf(
+            SearchCategory.Songs to songTitles,
+            SearchCategory.Albums to albumTitles,
+            SearchCategory.Artists to artistNames,
+            SearchCategory.Playlists to playlistNames,
+        )
+        // Prefer the entity itself on equal-strength matches: artist, then album, then song, then playlist.
+        return listOf(SearchCategory.Artists, SearchCategory.Albums, SearchCategory.Songs, SearchCategory.Playlists)
             .filter { names.getValue(it).isNotEmpty() }
             .sortedByDescending { category -> names.getValue(category).maxOf { score(it, query) } }
     }
