@@ -50,4 +50,6 @@ object Symbols {
     val LightMode = Symbol('\uE518')
     val GridView = Symbol('\uE9B0')
     val ListView = Symbol('\uE896')
+    val Hd = Symbol('\uE052')
+    val SurroundSound = Symbol('\uE049')
 }

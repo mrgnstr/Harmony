@@ -46,13 +46,25 @@ class AudioFormatProbe @Inject constructor(@ApplicationContext private val conte
                 }
             }
             // Containers whose header states depth/rate exactly: read it ourselves, which also works below API 33.
-            val head = if (mime == "audio/flac" || mime == "audio/raw") context.contentResolver.openInputStream(uri)?.use { it.readHead() } else null
+            val head = if (mime == "audio/flac" || mime == "audio/raw" || mime.startsWith("audio/eac3")) {
+                context.contentResolver.openInputStream(uri)?.use { it.readHead() }
+            } else null
+            var codec = AudioFormat.codecName(mime)
             if (head != null) {
-                (if (mime == "audio/flac") HeaderParser.flac(head) else HeaderParser.wav(head))?.let { (r, b) ->
-                    rate = r; bits = b
+                when (mime) {
+                    "audio/flac" -> HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b }
+                    "audio/raw" -> {
+                        // Some Android versions hand FLAC out as raw PCM (it is decoded by the extractor), so the header decides.
+                        HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b; codec = "FLAC" }
+                        if (codec == "PCM") HeaderParser.wav(head)?.let { (r, b) -> rate = r; bits = b; codec = "WAV" }
+                        if (codec == "PCM" && head.size > 4 && String(head, 0, 4, Charsets.ISO_8859_1) == "FORM") codec = "AIFF"
+                    }
+                    // JOC (Atmos) is only flagged in the MP4 `dec3` box; when the box can't be found, E-AC-3 counts as Atmos as before.
+                    else -> if (HeaderParser.eac3Joc(head) ?: true) codec = AudioFormat.DOLBY_ATMOS
                 }
             }
-            return AudioFormat(AudioFormat.codecName(mime), AudioFormat.isLossless(mime), rate, bits)
+            val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+            return AudioFormat(codec, AudioFormat.isLossless(mime), rate, bits, channels)
         } finally {
             extractor.release()
         }
@@ -65,7 +77,7 @@ class AudioFormatProbe @Inject constructor(@ApplicationContext private val conte
         return buffer.copyOf(n)
     }
 
-    private companion object { const val HEAD_BYTES = 4096 }
+    private companion object { const val HEAD_BYTES = 256 * 1024 }
 }
 
 /** Pure parsers over the first bytes of a file; each returns (sampleRateHz, bitDepth) or null. */
@@ -83,6 +95,29 @@ internal object HeaderParser {
         val rate = (u(0) shl 12) or (u(1) shl 4) or (u(2) shr 4)
         val bits = (((u(2) and 1) shl 4) or (u(3) shr 4)) + 1
         return rate to bits
+    }
+
+    /**
+     * Whether the E-AC-3 stream in an MP4 carries Joint Object Coding (Dolby Atmos): the `dec3` box ends with an extension
+     * (flag_ec3_extension_type_a + complexity index) after its substreams. Null when there is no `dec3` box in [b].
+     */
+    fun eac3Joc(b: ByteArray): Boolean? {
+        var at = -1
+        for (i in 4..b.size - 4) if (b[i] == 'd'.code.toByte() && b[i + 1] == 'e'.code.toByte() && b[i + 2] == 'c'.code.toByte() && b[i + 3] == '3'.code.toByte()) { at = i; break }
+        if (at < 0) return null
+        fun u(i: Int) = b[i].toInt() and 0xFF
+        val size = (u(at - 4) shl 24) or (u(at - 3) shl 16) or (u(at - 2) shl 8) or u(at - 1)
+        val end = minOf(at - 4 + size, b.size)
+        var p = at + 4
+        if (p + 2 > end) return null
+        val substreams = (u(p + 1) and 0x07) + 1
+        p += 2
+        repeat(substreams) {
+            if (p + 3 > end) return false
+            val dependents = (u(p + 2) shr 1) and 0x0F
+            p += if (dependents > 0) 4 else 3
+        }
+        return p + 2 <= end && (u(p) and 1) == 1 && u(p + 1) > 0
     }
 
     fun wav(b: ByteArray): Pair<Int, Int>? {

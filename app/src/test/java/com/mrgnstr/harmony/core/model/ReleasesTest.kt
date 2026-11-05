@@ -38,4 +38,22 @@ class ReleasesTest {
         val top = topSongs(songs, listOf(a, b), counts = mapOf(4L to 3, 2L to 5), limit = 3)
         assertEquals(listOf(2L, 4L, 1L), top.map { it.id })
     }
+
+    @Test
+    fun otherVersionsAreEditionsByTheSameArtist() {
+        val base = album(1, "Record")
+        val deluxe = album(2, "Record (Deluxe Edition)", year = 2021)
+        val dashed = album(3, "Record - Deluxe Edition", year = 2022)
+        val atmos = album(4, "Record [Atmos]", year = 2023)
+        val spelled = album(5, "Record: The Deluxe", year = 2024)
+        val otherName = album(6, "Another Record")
+        val otherArtist = album(7, "Record (Deluxe)", artist = "B")
+        val all = listOf(base, deluxe, dashed, atmos, spelled, otherName, otherArtist)
+        val versions = otherVersionsOf(base, all) { it.artist == "A" }
+        assertEquals(listOf(deluxe, dashed, atmos, spelled).toSet(), versions.toSet())
+        // From a deluxe edition, the plain album is a version too, and the album itself never is.
+        val fromDeluxe = otherVersionsOf(deluxe, all) { it.artist == "A" }
+        assertEquals(true, base in fromDeluxe)
+        assertEquals(false, deluxe in fromDeluxe)
+    }
 }

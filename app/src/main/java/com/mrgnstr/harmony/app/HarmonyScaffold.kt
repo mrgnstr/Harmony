@@ -2,6 +2,10 @@ package com.mrgnstr.harmony.app
 
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.navigation3.scene.Scene
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -53,13 +57,15 @@ import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDe
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
-import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import kotlinx.coroutines.delay
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalSharedTransitionScope
+import com.mrgnstr.harmony.core.designsystem.components.CoverShare
+import com.mrgnstr.harmony.core.designsystem.components.LocalCoverShare
 import com.mrgnstr.harmony.core.designsystem.blur.LocalChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.chromeSource
 import com.mrgnstr.harmony.core.designsystem.blur.rememberChromeBlurState
@@ -76,6 +82,7 @@ import com.mrgnstr.harmony.core.designsystem.theme.lerp
 import com.mrgnstr.harmony.core.designsystem.theme.rememberColorSourceRegistry
 import com.mrgnstr.harmony.core.device.VisualTier
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.feature.album.AlbumRoute
 import com.mrgnstr.harmony.feature.gallery.GalleryRoute
 import com.mrgnstr.harmony.feature.home.HomeRoute
 import com.mrgnstr.harmony.feature.library.LibraryRoute
@@ -90,30 +97,45 @@ private data class TabDestination(val tab: Tab, val destination: Dest)
 private const val TabMetadata = "harmony.tab"
 private const val PrebuildDelayMs = 1500L
 private const val PrebuildGapMs = 400L
+private const val EnterSnapMs = 450L
+// The bar and mini player recompose their whole subtree per notch of the colour blend: few notches, since each one costs a frame.
+private const val ChromeBlendSteps = 8
 
 /**
- * The app: resolves the colour source of the page on top and themes everything with it (blending towards the page below
- * while a back gesture is in progress), then lays out the pages with the floating bar over them.
+ * The app: themed with the wallpaper's colours at the top (it never changes while the app runs), then the pages with the floating bar
+ * over them. Pages wear their own colours ([EntryTheme]); the bar and the mini player blend to the page on top in [ChromeTheme].
+ * Colour schemes are a static composition local, so whatever changes one recomposes everything under it: blending the whole app's
+ * theme on every page change cost ~20 ms per blend step, and now only the bar and mini player are under the blending theme.
  */
 @Composable
 fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur: BlurMode, schemes: SchemeFactory, openPlayer: Int = 0) {
     val nav = rememberTabNavigator()
     val registry = rememberColorSourceRegistry()
-    val back by rememberBackProgress()
-    val stack = nav.backStack
-    val top = TabDestination(nav.current, stack.last())
-    val below = stack.getOrNull(stack.size - 2)?.let { TabDestination(nav.current, it) }
-    val topScheme = schemes.scheme(registry.sourceOf(top), dark)
-    val gesture = back != null && below != null
-    val target = if (gesture) lerp(topScheme, schemes.scheme(registry.sourceOf(below), dark), back!!) else topScheme
-    val scheme = animateColorScheme(target, snap = gesture, lowTier = tier == VisualTier.LOW)
 
-    HarmonyTheme(scheme, tier, chromeBlur, coverBlur) {
+    HarmonyTheme(schemes.scheme(ColorSource.Wallpaper, dark), tier, chromeBlur, coverBlur) {
         CompositionLocalProvider(LocalColorSourceRegistry provides registry) {
             val permission = rememberAudioPermissionState()
             if (permission.granted) Shell(nav, openPlayer, schemes, dark) else OnboardingScreen(permission)
         }
     }
+}
+
+/**
+ * The scheme of the page on top (blending towards the page below while a back gesture is in progress), animated, around the floating
+ * chrome: the tab bar and the mini player / Now Playing sheet.
+ */
+@Composable
+private fun ChromeTheme(nav: TabNavigator, schemes: SchemeFactory, dark: Boolean, tier: VisualTier, content: @Composable () -> Unit) {
+    val registry = LocalColorSourceRegistry.current
+    val back by rememberBackProgress()
+    val stack = nav.backStack
+    val top = TabDestination(nav.current, stack.last())
+    val below = stack.getOrNull(stack.size - 2)?.let { TabDestination(nav.current, it) }
+    val topScheme = schemes.scheme(registry?.sourceOf(top) ?: ColorSource.Wallpaper, dark)
+    val gesture = back != null && below != null
+    val target = if (gesture) lerp(topScheme, schemes.scheme(registry?.sourceOf(below) ?: ColorSource.Wallpaper, dark), back!!) else topScheme
+    val scheme = animateColorScheme(target, snap = gesture, lowTier = tier == VisualTier.LOW, steps = ChromeBlendSteps)
+    HarmonyTheme(scheme, tier, LocalChromeBlurMode.current, LocalCoverBlurMode.current, content)
 }
 
 /** Progress (0…1) of a back gesture in progress, null when there is none. */
@@ -175,8 +197,13 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
             }
             entry<Dest.Settings> { SettingsRoute(onBack = back) }
             entry<Dest.Gallery> { GalleryRoute(onBack = back) }
-            // Album, Artist, Genre and Playlist pages land with their milestones (M5–M7).
-            entry<Dest.Album> { SettingsRoute(onBack = back) }
+            entry<Dest.Album>(metadata = mapOf(CoverPageMetadata to true)) { album ->
+                AlbumRoute(
+                    album.albumId, album.title, onBack = back,
+                    onOpenAlbum = { nav.push(Dest.Album(it.id, it.title)) }, onOpenArtist = { nav.push(Dest.Artist(it)) },
+                )
+            }
+            // Artist, Genre and Playlist pages land with their milestones (M7 and later).
             entry<Dest.Artist> { SettingsRoute(onBack = back) }
             entry<Dest.Genre> { SettingsRoute(onBack = back) }
             entry<Dest.Playlist> { SettingsRoute(onBack = back) }
@@ -192,7 +219,8 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
         }
     }
 
-    CompositionLocalProvider(LocalBottomBarInset provides bottomInset, LocalChromeBlurState provides blur) {
+    val coverShare = remember { CoverShare() }
+    CompositionLocalProvider(LocalBottomBarInset provides bottomInset, LocalChromeBlurState provides blur, LocalCoverShare provides coverShare) {
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this) {
                 Box(Modifier.fillMaxSize().onSizeChanged { rootHeightPx = it.height.toFloat() }) {
@@ -219,29 +247,31 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                                         ),
                                         sharedTransitionScope = this@SharedTransitionLayout,
                                         entryProvider = tabEntries,
-                                        transitionSpec = { pushTransition() },
-                                        popTransitionSpec = { popTransition() },
+                                        transitionSpec = { if (targetState.isCoverPage()) coverPushTransition() else pushTransition() },
+                                        popTransitionSpec = { if (initialState.isCoverPage()) coverPopTransition() else popTransition() },
                                         predictivePopTransitionSpec = { predictivePopTransition() },
                                     )
                                 }
                             }
                         }
                     }
-                    AppBar(
-                        current = nav.current,
-                        onSelect = nav::select,
-                        blur = blur,
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
-                            // The open player slides the bar off the bottom; a mini player thrown down pushes it the same way (capped), and
-                            // once the pill is gone the push springs back on its own.
-                            .graphicsLayer {
-                                val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx()
-                                val cap = 0.1f * (rootHeightPx - (barTop + MiniPlayerGap + MiniPlayerHeight).toPx())
-                                val pushed = sheet.barPush
-                                translationY = maxOf(slide, if (pushed > 0f && cap > 0f) cap * kotlin.math.tanh(pushed / cap) else 0f)
-                            },
-                    )
-                    PlayerSheet(sheet, restingBottom = barTop + MiniPlayerGap, blur = blur)
+                    ChromeTheme(nav, schemes, dark, tier.value) {
+                        AppBar(
+                            current = nav.current,
+                            onSelect = nav::select,
+                            blur = blur,
+                            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
+                                // The open player slides the bar off the bottom; a mini player thrown down pushes it the same way (capped), and
+                                // once the pill is gone the push springs back on its own.
+                                .graphicsLayer {
+                                    val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx()
+                                    val cap = 0.1f * (rootHeightPx - (barTop + MiniPlayerGap + MiniPlayerHeight).toPx())
+                                    val pushed = sheet.barPush
+                                    translationY = maxOf(slide, if (pushed > 0f && cap > 0f) cap * kotlin.math.tanh(pushed / cap) else 0f)
+                                },
+                        )
+                        PlayerSheet(sheet, restingBottom = barTop + MiniPlayerGap, blur = blur)
+                    }
                 }
             }
         }
@@ -255,22 +285,32 @@ private fun SurfaceFill() = Box(Modifier.fillMaxSize().background(MaterialTheme.
 /**
  * A page wears its own colours: the scheme of the source it claimed, blended from the wallpaper's when the claim arrives. Pages
  * slide past each other (tab switch, push, back) in their own colours, so no colour has to animate across both of them, which
- * recomposed every colour reader of both pages every frame; only the chrome (tab bar, mini player) blends, in [HarmonyApp].
+ * recomposed every colour reader of both pages every frame; only the chrome (tab bar, mini player) blends, in [ChromeTheme].
  */
 @Composable
 private fun EntryTheme(key: Any, schemes: SchemeFactory, dark: Boolean, tier: VisualTier, content: @Composable () -> Unit) {
     val registry = LocalColorSourceRegistry.current
     val target = schemes.scheme(registry?.sourceOf(key) ?: ColorSource.Wallpaper, dark)
-    val scheme = animateColorScheme(target, snap = false, lowTier = tier == VisualTier.LOW)
+    // A page that is still coming in takes its colours at once: it is fading in anyway, and every blend step recomposes the whole page.
+    val entering by produceState(true) { delay(EnterSnapMs); value = false }
+    val scheme = animateColorScheme(target, snap = entering, lowTier = tier == VisualTier.LOW)
     HarmonyTheme(scheme, tier, LocalChromeBlurMode.current, LocalCoverBlurMode.current, content)
 }
-
-/** For pages that share elements across navigation (cover → album header, …). */
-val LocalSharedTransitionScope = staticCompositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }
 
 // In-tab pages: Material's shared X axis (a short slide and a fade), on springs that settle without bounce.
 private val PageSlide = spring(dampingRatio = 1f, stiffness = 500f, visibilityThreshold = IntOffset.VisibilityThreshold)
 private val PageFade = spring<Float>(dampingRatio = 1f, stiffness = 700f)
+
+/** Album pages receive their cover from a tile, so they do not slide: the page fades in over the old one while the cover flies into place. */
+private const val CoverPageMetadata = "harmony.coverPage"
+private fun Scene<*>.isCoverPage() = entries.lastOrNull()?.metadata?.containsKey(CoverPageMetadata) == true
+
+private val CoverPageFade = tween<Float>(240, easing = LinearOutSlowInEasing)
+
+private fun coverPushTransition(): ContentTransform = ContentTransform(fadeIn(CoverPageFade, initialAlpha = 0f), ExitTransition.None)
+
+// The page going away stays on top of the one below it (which is already there) while it fades.
+private fun coverPopTransition(): ContentTransform = ContentTransform(EnterTransition.None, fadeOut(CoverPageFade), targetContentZIndex = -1f)
 
 private fun pushTransition(): ContentTransform =
     (slideInHorizontally(PageSlide) { it / 4 } + fadeIn(PageFade)) togetherWith (slideOutHorizontally(PageSlide) { -it / 6 } + fadeOut(PageFade))

@@ -34,6 +34,26 @@ fun List<Album>.mainEditions(): List<Album> {
     return filter { main[it.title.editionBase()] === it }
 }
 
+private val Deluxe = Regex("""(?i)\bdeluxe\b""")
+
+/**
+ * The other editions of [current] among [albums] (an album page's "Other Versions"): releases by the same artist ([sameArtist]) whose
+ * title is the same once parentheses are ignored ("Album (Deluxe)", "Album [Atmos]"), the same once edition markers are removed
+ * ("Album - Deluxe Edition"), or that holds this album's name and says "deluxe" (or the other way round). Oldest first.
+ */
+fun otherVersionsOf(current: Album, albums: List<Album>, sameArtist: (Album) -> Boolean): List<Album> {
+    val base = current.title.baseTitle()
+    val edition = current.title.editionBase()
+    return albums.filter { other ->
+        if (other.id == current.id && other.title == current.title) return@filter false
+        if (!sameArtist(other)) return@filter false
+        val otherBase = other.title.baseTitle()
+        otherBase == base || other.title.editionBase() == edition ||
+            ((Deluxe.containsMatchIn(other.title) || Deluxe.containsMatchIn(current.title)) &&
+                (other.title.lowercase().contains(base) || current.title.lowercase().contains(otherBase)))
+    }.sortedWith(compareBy<Album> { if (it.year > 0) it.year else Int.MAX_VALUE }.thenBy { it.title.length })
+}
+
 /** The release an artist is pictured with: the newest full album (main edition), else the newest single or EP. */
 fun heroOf(releases: List<Album>): Album? {
     val sorted = releases.sortedWith(NewestFirst).mainEditions()

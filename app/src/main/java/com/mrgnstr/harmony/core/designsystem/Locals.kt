@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
@@ -79,3 +80,6 @@ fun Modifier.bleedSides(insets: SideInsets): Modifier = if (insets.left == 0.dp 
     val placeable = measurable.measure(constraints.copy(minWidth = wide, maxWidth = wide))
     layout(constraints.maxWidth, placeable.height) { placeable.place(-left, 0) }
 }
+
+/** The app's root shared-transition scope, for pages that share an element across navigation (album cover: tile → page). */
+val LocalSharedTransitionScope = staticCompositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }

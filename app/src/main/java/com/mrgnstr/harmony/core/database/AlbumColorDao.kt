@@ -9,6 +9,9 @@ interface AlbumColorDao {
     @Query("SELECT * FROM album_colors WHERE albumId = :albumId")
     suspend fun get(albumId: Long): AlbumColorEntity?
 
+    @Query("SELECT * FROM album_colors")
+    suspend fun all(): List<AlbumColorEntity>
+
     @Query("DELETE FROM album_colors")
     suspend fun clear()
 

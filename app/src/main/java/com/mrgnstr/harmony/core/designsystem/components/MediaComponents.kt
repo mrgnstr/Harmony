@@ -106,9 +106,15 @@ fun ArtworkTile(
     }
 }
 
+/** An album tile. Opening it lends its cover to the album page (see [sharedCover]). */
 @Composable
 fun AlbumTile(album: Album, onClick: () -> Unit, modifier: Modifier = Modifier, subtitle: String? = album.artist) {
-    ArtworkTile(album.title, subtitle, onClick, modifier) { ArtworkImage(album.artSongId, album.id, it) }
+    val share = LocalCoverShare.current
+    val owner = remember { Any() }
+    val key = albumCoverKey(album.id, album.title)
+    ArtworkTile(album.title, subtitle, { share?.claim(key, owner); onClick() }, modifier) {
+        ArtworkImage(album.artSongId, album.id, it.sharedCover(key, owner))
+    }
 }
 
 /** A song row: thumbnail, title / subtitle, overflow button. [playing] tints the title. */

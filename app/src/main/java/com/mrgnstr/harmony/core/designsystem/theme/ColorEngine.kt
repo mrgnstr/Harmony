@@ -125,16 +125,16 @@ private val LowTierColorTween = tween<Float>(250)
 
 private const val BlendSteps = 20
 
-private class SchemeBlend(initial: ColorScheme) {
+private class SchemeBlend(initial: ColorScheme, private val steps: Int) {
     var from = initial
     var to = initial
     val progress = Animatable(1f)
 
     // Read in composition: a colour change recomposes everything that reads a colour (a page full of text and icons, both pages of a
     // transition), so the blend moves in BlendSteps notches, not every frame. 30 Hz colour is invisible; 60+ recompositions are not.
-    private val step = derivedStateOf { (progress.value * BlendSteps).roundToInt() }
+    private val step = derivedStateOf { (progress.value * steps).roundToInt() }
 
-    val current: ColorScheme get() = step.value.let { if (it >= BlendSteps) to else lerp(from, to, it / BlendSteps.toFloat()) }
+    val current: ColorScheme get() = step.value.let { if (it >= steps) to else lerp(from, to, it / steps.toFloat()) }
 
     suspend fun animateTo(target: ColorScheme, lowTier: Boolean) {
         if (target === to) return
@@ -153,11 +153,11 @@ private class SchemeBlend(initial: ColorScheme) {
 
 /**
  * The scheme shown on screen, following [target]: every change blends from whatever is showing (even mid-blend) to the new
- * target on one spring. With [snap] it follows [target] frame by frame instead (a predictive back gesture drives the blend).
+ * target on one spring, in [steps] notches (each one recomposes everything under the theme). With [snap] it follows [target] frame by frame instead (a predictive back gesture drives the blend).
  */
 @Composable
-fun animateColorScheme(target: ColorScheme, snap: Boolean, lowTier: Boolean): ColorScheme {
-    val blend = remember { SchemeBlend(target) }
+fun animateColorScheme(target: ColorScheme, snap: Boolean, lowTier: Boolean, steps: Int = BlendSteps): ColorScheme {
+    val blend = remember { SchemeBlend(target, steps) }
     LaunchedEffect(target, snap) { if (!snap) blend.animateTo(target, lowTier) }
     if (snap) {
         blend.hold(target)

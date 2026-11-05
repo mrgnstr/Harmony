@@ -40,7 +40,9 @@ fun ArtworkImage(
     val context = LocalPlatformContext.current
     val request = remember(key, placeholderOf, crossfadeMs, context) {
         ImageRequest.Builder(context).data(key).apply {
-            if (placeholderOf != null && placeholderOf != key) placeholderMemoryCacheKey(MemoryCache.Key(placeholderOf.cacheKey))
+            // The same cover at another size (a tile opening into the album page) is in the memory cache under the same key: show it
+            // while the new size loads, instead of the note placeholder.
+            placeholderMemoryCacheKey(MemoryCache.Key((placeholderOf ?: key).cacheKey))
             if (crossfadeMs > 0) crossfade(crossfadeMs)
         }.build()
     }

@@ -72,6 +72,8 @@ ICONS = {
     "LightMode": "light_mode",
     "GridView": "grid_view",
     "ListView": "list",
+    "Hd": "hd",
+    "SurroundSound": "surround_sound",
 }
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

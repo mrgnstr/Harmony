@@ -42,16 +42,25 @@ class ArtworkColorStore @Inject constructor(
         prefs.edit().putInt("rule", RULE_VERSION).apply()
     }
 
+    /** Palettes already read or computed, so an album page can theme itself in its very first frame. */
+    private val memory = java.util.concurrent.ConcurrentHashMap<Long, AlbumPalette>()
+
+    /** The palette if it is in memory (no waiting), else null. */
+    fun peek(albumId: Long): AlbumPalette? = memory[albumId]
+
     suspend fun paletteFor(songId: Long, albumId: Long): AlbumPalette? {
         if (albumId <= 0) return null
+        memory[albumId]?.let { return it }
         invalidateStale()
-        dao.get(albumId)?.let { return it.toModel() }
-        return compute(songId, albumId).also { dao.upsert(it.toEntity()) }
+        val palette = dao.get(albumId)?.toModel() ?: compute(songId, albumId).also { dao.upsert(it.toEntity()) }
+        memory[albumId] = palette
+        return palette
     }
 
     /** Fills in every album that has no stored colours yet. Low priority, one album at a time. */
     suspend fun precomputeMissing() {
         invalidateStale()
+        dao.all().forEach { memory[it.albumId] = it.toModel() }
         for (album in dao.missing()) {
             dao.upsert(compute(album.songId, album.albumId).toEntity())
             yield()
