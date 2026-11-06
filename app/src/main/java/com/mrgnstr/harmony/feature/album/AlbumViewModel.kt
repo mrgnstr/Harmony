@@ -6,16 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
 import com.mrgnstr.harmony.core.data.FavouritesRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
+import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.data.PlaylistRepository
+import com.mrgnstr.harmony.core.download.OfflineDownloadManager
 import com.mrgnstr.harmony.core.mediastore.AlbumCredits
 import com.mrgnstr.harmony.core.database.AlbumKey
 import com.mrgnstr.harmony.core.mediastore.AlbumCreditsReader
 import com.mrgnstr.harmony.core.mediastore.AudioFormatProbe
 import com.mrgnstr.harmony.core.model.Album
+import com.mrgnstr.harmony.core.model.AlbumExtraInfo
 import com.mrgnstr.harmony.core.model.AudioFormat
 import com.mrgnstr.harmony.core.model.FormatTag
 import com.mrgnstr.harmony.core.model.NewestFirst
 import com.mrgnstr.harmony.core.model.Playlist
+import com.mrgnstr.harmony.core.model.ShareLink
 import com.mrgnstr.harmony.core.model.Song
 import com.mrgnstr.harmony.core.model.mainEditions
 import com.mrgnstr.harmony.core.model.otherVersionsOf
@@ -55,6 +59,7 @@ data class AlbumUiState(
     val favouriteAlbum: Boolean = false,
     val otherVersions: List<Album> = emptyList(),
     val moreByArtist: List<Album> = emptyList(),
+    val remoteExtra: AlbumExtraInfo? = null,
 )
 
 @HiltViewModel(assistedFactory = AlbumViewModel.Factory::class)
@@ -67,6 +72,8 @@ class AlbumViewModel @AssistedInject constructor(
     private val creditsReader: AlbumCreditsReader,
     private val favourites: FavouritesRepository,
     private val playlistRepository: PlaylistRepository,
+    private val navidrome: NavidromeRepository,
+    private val downloads: OfflineDownloadManager,
     private val player: PlayerConnection,
 ) : ViewModel() {
     @AssistedFactory
@@ -84,18 +91,41 @@ class AlbumViewModel @AssistedInject constructor(
         viewModelScope.launch {
             val songs = songsFlow.first { it.isNotEmpty() }
             launch { accent.value = colorStore.paletteFor(songs.first().id, albumId)?.takeIf { it.hasArt }?.primary }
-            // Probing is capped on long albums: the main formats are clear from the first few dozen files.
-            launch { formats.value = AudioFormat.tags(songs.take(40).mapNotNull { probe.probe(it.id) }) }
-            // The first song that has a label or copyright tag speaks for the album.
-            launch { credits.value = songs.take(4).firstNotNullOfOrNull { creditsReader.read(it.id) } }
+            if (songs.first().isRemote) {
+                launch {
+                    val remoteFormats = songs.take(40).mapNotNull { s ->
+                        val c = s.codec ?: return@mapNotNull null
+                        AudioFormat(c, s.lossless, s.sampleRateHz, s.bitDepth, s.channels)
+                    }
+                    formats.value = AudioFormat.tags(remoteFormats)
+                }
+                launch { navidrome.enrichAlbumInfo(albumId) }
+            } else {
+                // Probing is capped on long albums: the main formats are clear from the first few dozen files.
+                launch { formats.value = AudioFormat.tags(songs.take(40).mapNotNull { probe.probe(it.id) }) }
+                // The first song that has a label or copyright tag speaks for the album.
+                launch { credits.value = songs.take(4).firstNotNullOfOrNull { creditsReader.read(it.id) } }
+            }
         }
     }
 
     private val library = combine(songsFlow, repository.albums, repository.artistIndex, ::Triple)
 
-    private class Extras(val accent: Int?, val formats: List<FormatTag>, val credits: AlbumCredits?, val favouriteSongs: Set<Long>, val favouriteAlbums: Set<AlbumKey>)
+    private class Extras(
+        val accent: Int?,
+        val formats: List<FormatTag>,
+        val credits: AlbumCredits?,
+        val favouriteSongs: Set<Long>,
+        val favouriteAlbums: Set<AlbumKey>,
+        val remoteExtra: AlbumExtraInfo?,
+    )
 
-    private val extras = combine(accent, formats, credits, favourites.songIds, favourites.albums, ::Extras)
+    private val extras = combine(
+        combine(accent, formats, credits, ::Triple),
+        combine(favourites.songIds, favourites.albums, navidrome.observeAlbumExtra(albumId), ::Triple),
+    ) { (acc, fmt, cred), (favSongs, favAlbums, remote) ->
+        Extras(acc, fmt, cred, favSongs, favAlbums, remote)
+    }
 
     /** The user's playlists, for the add-to-playlist sheet. */
     val playlists: StateFlow<List<Playlist>> = playlistRepository.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -108,6 +138,9 @@ class AlbumViewModel @AssistedInject constructor(
         val self = albums.firstOrNull { it.id == albumId && it.title == title }
         val versions = if (self == null) emptyList() else otherVersionsOf(self, albums) { it.sharesArtist() }
         val versionKeys = versions.mapTo(HashSet()) { it.id to it.title }
+        val mergedCredits = extras.credits ?: extras.remoteExtra?.recordLabels?.takeIf { it.isNotEmpty() }?.let {
+            AlbumCredits(label = it.joinToString(", "), copyright = null)
+        }
         AlbumUiState(
             loaded = true,
             title = title,
@@ -122,13 +155,14 @@ class AlbumViewModel @AssistedInject constructor(
             accent = extras.accent,
             durationMs = songs.sumOf { it.durationMs },
             addedSec = songs.maxOf { it.dateAddedSec },
-            credits = extras.credits,
+            credits = mergedCredits,
             favouriteSongs = extras.favouriteSongs,
             favouriteAlbum = AlbumKey(albumId, title) in extras.favouriteAlbums,
             otherVersions = versions,
             // Everything else by the artist: this album and its other versions are not repeated here.
             moreByArtist = albums.filter { it.sharesArtist() && !(it.id == albumId && it.title == title) && (it.id to it.title) !in versionKeys }
                 .sortedWith(NewestFirst).mainEditions(),
+            remoteExtra = extras.remoteExtra,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumUiState(title = title, accent = accent.value))
 
@@ -149,4 +183,17 @@ class AlbumViewModel @AssistedInject constructor(
     fun addToPlaylist(playlistId: Long, songs: List<Song>) { viewModelScope.launch { playlistRepository.addSongs(playlistId, songs.map { it.id }) } }
 
     fun addToNewPlaylist(name: String, songs: List<Song>) { viewModelScope.launch { playlistRepository.create(name, songIds = songs.map { it.id }) } }
+
+    fun downloadAlbum() { downloads.downloadSongs(state.value.songs) }
+
+    suspend fun createShare(description: String, downloadable: Boolean): ShareLink? =
+        navidrome.createShareForAlbum(albumId, description, downloadable = downloadable)
+
+    fun refreshServerMetadata() {
+        val remoteId = state.value.remoteExtra?.remoteId ?: return
+        viewModelScope.launch {
+            navidrome.refreshEntityMetadata("al", remoteId)
+            navidrome.enrichAlbumInfo(albumId)
+        }
+    }
 }

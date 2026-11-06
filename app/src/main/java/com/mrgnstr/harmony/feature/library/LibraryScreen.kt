@@ -65,6 +65,7 @@ import com.mrgnstr.harmony.core.designsystem.motion.Springs
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.Artist
 import com.mrgnstr.harmony.core.model.LibrarySort
+import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import kotlinx.coroutines.launch
 
 /**
@@ -86,14 +87,36 @@ fun LibraryRoute(
     val pager = rememberPagerState { tabs.size }
     val scope = rememberCoroutineScope()
     val sorts by viewModel.sorts.collectAsStateWithLifecycle()
+    val sourceMode by viewModel.sourceMode.collectAsStateWithLifecycle()
+    val hasNavidrome by viewModel.hasNavidrome.collectAsStateWithLifecycle()
     val current = tabs[pager.currentPage]
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var sourceMenuOpen by remember { mutableStateOf(false) }
     // Where each tab's label is drawn (x in the window, width), and where the indicator's slot starts: the indicator is placed from these.
     val labels = remember { mutableStateListOf<Pair<Float, Int>>().apply { repeat(tabs.size) { add(0f to 0) } } }
     var slotX by remember { mutableFloatStateOf(0f) }
     TopBarScaffold(
         title = "Library",
         actions = {
+            if (hasNavidrome) {
+                Box {
+                    IconButton(onClick = { sourceMenuOpen = true }) {
+                        SymbolIcon(
+                            if (sourceMode == LibrarySourceMode.NavidromeOnly) Symbols.Cloud else Symbols.FilterList,
+                            "Music source",
+                        )
+                    }
+                    DropdownMenu(sourceMenuOpen, { sourceMenuOpen = false }) {
+                        LibrarySourceMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                trailingIcon = { if (mode == sourceMode) SymbolIcon(Symbols.Check, null) },
+                                onClick = { viewModel.setSourceMode(mode); sourceMenuOpen = false },
+                            )
+                        }
+                    }
+                }
+            }
             if (current.keys.isNotEmpty()) {
                 Box {
                     IconButton(onClick = { sortMenuOpen = true }) { SymbolIcon(Symbols.Sort, "Sort") }

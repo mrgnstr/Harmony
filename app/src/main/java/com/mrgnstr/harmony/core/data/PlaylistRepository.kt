@@ -34,6 +34,18 @@ class PlaylistRepository @Inject constructor(
                 durationMs = rows.sumOf { it.durationMs }, updatedAtMs = p.updatedAtMs,
                 // The generated cover uses the first four songs that have different album covers.
                 art = rows.distinctBy { it.albumId }.take(4).map { ArtRef(it.songId, it.albumId) },
+                serverId = p.serverId,
+                remoteId = p.remoteId,
+                comment = p.comment,
+                isPublic = p.isPublic,
+                owner = p.owner,
+                isSmart = p.isSmart,
+                readonly = p.readonly,
+                validUntilMs = p.validUntilMs,
+                rulesJson = p.rulesJson,
+                coverArtId = p.coverArtId,
+                userRating = p.userRating,
+                starred = p.starred,
             )
         }
     }.flowOn(Dispatchers.Default)

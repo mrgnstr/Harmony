@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.Constraints
 import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -23,7 +24,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -85,6 +88,29 @@ fun ArtistRoute(
                     ArtistReleaseShelf.entries.forEach { section ->
                         releaseShelf(section.title, state.releases(section), onOpenAlbum) { onOpenShelf(section, state.accent) }
                     }
+                    val similar = state.remoteExtra?.similarArtists.orEmpty()
+                    if (similar.isNotEmpty()) {
+                        item("similar:heading", contentType = "heading") { SectionHeading("Similar Artists") }
+                        item("similar:row", contentType = "shelf") {
+                            val openArtist = LocalOpenArtist.current
+                            val sides = LocalSideInsets.current
+                            LazyRow(Modifier.bleedSides(sides), contentPadding = sides.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(similar, key = { "sim:${it.id}:${it.name}" }) { sim ->
+                                    ArtworkTile(
+                                        title = sim.name,
+                                        subtitle = sim.albumCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" },
+                                        onClick = { openArtist?.invoke(sim.name) },
+                                        circular = true,
+                                        modifier = Modifier.width(120.dp),
+                                    ) { artMod ->
+                                        Box(artMod.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                                            SymbolIcon(Symbols.Artist, null, size = 36.dp, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if (state.songs.isEmpty()) item("empty") {
                         Text("No releases in your library", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -108,6 +134,9 @@ fun ArtistRoute(
                     if (state.imagePath != null) DropdownMenuItem(text = { Text("Use default image") }, onClick = { close(); viewModel.clearImage() })
                     DropdownMenuItem(text = { Text("Choose title logo") }, leadingIcon = { SymbolIcon(Symbols.Edit, null) }, onClick = { close(); logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
                     if (state.logoPath != null) DropdownMenuItem(text = { Text("Use default title") }, onClick = { close(); viewModel.clearImage(logo = true) })
+                    if (state.remoteExtra != null) {
+                        DropdownMenuItem(text = { Text("Refresh server metadata") }, leadingIcon = { SymbolIcon(Symbols.Refresh, null) }, onClick = { close(); viewModel.refreshServerMetadata() })
+                    }
                 },
             )
         }
@@ -173,31 +202,56 @@ private fun ArtistActions(onInfo: () -> Unit, onPlay: () -> Unit, onShuffle: () 
 
 @Composable
 private fun LatestRelease(album: Album, onOpen: () -> Unit, onPlay: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 20.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.clickable(onClick = onOpen).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            ArtworkImage(album.artSongId, album.id, Modifier.size(80.dp).clip(RoundedCornerShape(16.dp)))
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text("Latest Release", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text(album.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(album.year.takeIf { it > 0 }?.toString(), "${album.songCount} ${if (album.songCount == 1) "song" else "songs"}").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    var menuOpen by remember { mutableStateOf(false) }
+    var menuInitialized by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val share = LocalCoverShare.current
+    val owner = remember { Any() }
+    val coverKey = albumCoverKey(album.id, album.title)
+    Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Row(
+                Modifier
+                    .combinedClickable(
+                        onClick = { share?.claim(coverKey, owner); onOpen() },
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuInitialized = true
+                            menuOpen = true
+                        },
+                    )
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ArtworkImage(album.artSongId, album.id, Modifier.size(80.dp).clip(RoundedCornerShape(16.dp)).sharedCover(coverKey, owner))
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text("Latest Release", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(album.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(album.year.takeIf { it > 0 }?.toString(), "${album.songCount} ${if (album.songCount == 1) "song" else "songs"}").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                FilledIconButton(onPlay, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(48.dp)) { SymbolIcon(Symbols.Play, "Play ${album.title}", fill = 1f) }
             }
-            FilledIconButton(onPlay, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(48.dp)) { SymbolIcon(Symbols.Play, "Play ${album.title}", fill = 1f) }
+        }
+        if (menuInitialized) {
+            AlbumContextMenu(
+                album = album,
+                expanded = menuOpen,
+                onDismiss = { menuOpen = false },
+                showGoToArtist = false,
+            )
         }
     }
 }
 
 @Composable
-private fun ArtistSongRow(song: Song, playing: Boolean, onPlay: () -> Unit, viewModel: ArtistViewModel) {
-    var menu by remember { mutableStateOf(false) }
-    Box {
-        SongRow(song, onPlay, subtitle = listOfNotNull(song.album, song.year.takeIf { it > 0 }?.toString()).joinToString(" · "), playing = playing, onMore = { menu = true })
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text("Play next") }, onClick = { menu = false; viewModel.playNext(song) })
-                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { menu = false; viewModel.addToQueue(song) })
-            }
-        }
-    }
+private fun ArtistSongRow(song: Song, playing: Boolean, onPlay: () -> Unit, @Suppress("UNUSED_PARAMETER") viewModel: ArtistViewModel) {
+    SongRow(
+        song = song,
+        onClick = onPlay,
+        subtitle = listOfNotNull(song.album, song.year.takeIf { it > 0 }?.toString()).joinToString(" · "),
+        playing = playing,
+        showGoToArtist = false,
+    )
 }
 
 private fun LazyListScope.releaseShelf(title: String, albums: List<Album>, onOpen: (Album) -> Unit, onMore: () -> Unit) {
@@ -206,7 +260,7 @@ private fun LazyListScope.releaseShelf(title: String, albums: List<Album>, onOpe
     item("$title:row", contentType = "shelf") {
         val sides = LocalSideInsets.current
         LazyRow(Modifier.bleedSides(sides), contentPadding = sides.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(albums, key = { "${it.id}:${it.title}" }) { album -> AlbumTile(album, { onOpen(album) }, Modifier.width(ShelfTileWidth), subtitle = album.year.takeIf { it > 0 }?.toString()) }
+            items(albums, key = { "${it.id}:${it.title}" }) { album -> AlbumTile(album, { onOpen(album) }, Modifier.width(ShelfTileWidth), subtitle = album.year.takeIf { it > 0 }?.toString(), showGoToArtist = false) }
         }
     }
 }
@@ -235,6 +289,16 @@ fun ArtistInfoRoute(
     TopBarScaffold("Artist Info", subtitle = name, onBack = onBack) {
         LazyColumn(contentPadding = LocalSideInsets.current.padding(horizontal = 20.dp, top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text(name, style = MaterialTheme.typography.headlineMediumEmphasized) }
+            state.remoteExtra?.biography?.takeIf { it.isNotBlank() }?.let { bio ->
+                item {
+                    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Biography", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(bio, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            }
             item { Text("In Your Library", style = MaterialTheme.typography.titleLarge) }
             val years = state.songs.map { it.year }.filter { it > 0 }
             val minutes = state.songs.sumOf { it.durationMs } / 60_000
@@ -245,6 +309,8 @@ fun ArtistInfoRoute(
                 years.takeIf { it.isNotEmpty() }?.let { "Release years" to (if (it.min() == it.max()) "${it.min()}" else "${it.min()}–${it.max()}") },
                 "Music length" to (if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"),
                 state.songs.mapNotNull { it.genre?.takeIf(String::isNotBlank) }.distinct().takeIf { it.isNotEmpty() }?.let { "Genres" to it.joinToString() },
+                state.remoteExtra?.roles?.takeIf { it.isNotEmpty() }?.let { "Roles" to it.joinToString { r -> r.replaceFirstChar(Char::uppercase) } },
+                state.remoteExtra?.mbzArtistId?.takeIf { it.isNotBlank() }?.let { "MusicBrainz ID" to it },
             )
             items(facts) { (label, value) ->
                 Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {

@@ -83,3 +83,9 @@ fun Modifier.bleedSides(insets: SideInsets): Modifier = if (insets.left == 0.dp 
 
 /** The app's root shared-transition scope, for pages that share an element across navigation (album cover: tile → page). */
 val LocalSharedTransitionScope = staticCompositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }
+
+/** Opens an album page from anywhere (e.g. a song's context menu). */
+val LocalOpenAlbum = compositionLocalOf<((com.mrgnstr.harmony.core.model.Album) -> Unit)?> { null }
+
+/** Opens an artist page from anywhere (e.g. a song or album's context menu). */
+val LocalOpenArtist = compositionLocalOf<((String) -> Unit)?> { null }

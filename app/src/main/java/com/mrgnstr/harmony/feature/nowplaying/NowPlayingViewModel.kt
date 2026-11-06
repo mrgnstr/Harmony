@@ -7,6 +7,12 @@ import com.mrgnstr.harmony.core.artwork.CoverStripCache
 import com.mrgnstr.harmony.core.artwork.CoverStripSpec
 import com.mrgnstr.harmony.core.artwork.CoverStrips
 import com.mrgnstr.harmony.core.data.FavouritesRepository
+import com.mrgnstr.harmony.core.data.LibraryRepository
+import com.mrgnstr.harmony.core.data.LyricsRepository
+import com.mrgnstr.harmony.core.data.NavidromeRepository
+import com.mrgnstr.harmony.core.model.AudioBookmark
+import com.mrgnstr.harmony.core.model.JukeboxState
+import com.mrgnstr.harmony.core.model.Lyrics
 import com.mrgnstr.harmony.core.playback.PlaybackProgress
 import com.mrgnstr.harmony.core.playback.PlaybackSnapshot
 import com.mrgnstr.harmony.core.playback.PlayerConnection
@@ -18,6 +24,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -29,9 +38,17 @@ class NowPlayingViewModel @Inject constructor(
     private val stripCache: CoverStripCache,
     private val favourites: FavouritesRepository,
     private val colorStore: ArtworkColorStore,
+    private val lyricsRepository: LyricsRepository,
+    private val libraryRepository: LibraryRepository,
+    val navidrome: NavidromeRepository,
 ) : ViewModel() {
     val snapshot: StateFlow<PlaybackSnapshot> = player.state
     val queue: StateFlow<QueueState> = player.queue
+    val jukeboxState: StateFlow<JukeboxState> = navidrome.jukeboxState
+    val hasNavidrome: StateFlow<Boolean> = navidrome.activeAccount.map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val hasJukeboxRole: StateFlow<Boolean> = navidrome.activeAccount.map { it?.jukeboxRole == true || it?.isAdmin == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Ticks only while the full player is on screen. */
     val progress: StateFlow<PlaybackProgress> = player.progress()
@@ -41,6 +58,20 @@ class NowPlayingViewModel @Inject constructor(
         combine(favourites.songIds, player.state.map { it.songId }.distinctUntilChanged()) { ids, id -> id != null && id in ids }
             .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val lyrics: StateFlow<Lyrics?> = player.state
+        .map { it.songId }
+        .distinctUntilChanged()
+        .mapLatest { songId -> if (songId != null) lyricsRepository.lyricsFor(songId) else null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentBookmark: StateFlow<AudioBookmark?> = player.state
+        .map { it.songId }
+        .distinctUntilChanged()
+        .flatMapLatest { songId -> if (songId != null) navidrome.observeBookmarkForSong(songId) else flowOf(null) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** The controls' colours, from the cover's palette; re-resolved when the album changes, not on every song within one album. */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -66,4 +97,68 @@ class NowPlayingViewModel @Inject constructor(
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun toggleShuffle() = player.toggleShuffle()
     fun cycleRepeat() = player.cycleRepeat()
+    fun skipToQueueIndex(index: Int) = player.skipToQueueIndex(index)
+    fun removeQueueItem(index: Int) = player.removeQueueItem(index)
+
+    fun saveCloudQueue() {
+        val q = queue.value
+        val pos = progress.value.positionMs
+        viewModelScope.launch {
+            navidrome.saveCloudQueue(q.items.map { it.songId }, q.currentIndex, pos)
+        }
+    }
+
+    fun loadCloudQueue() {
+        viewModelScope.launch {
+            val remote = navidrome.loadCloudQueue() ?: return@launch
+            if (remote.songs.isNotEmpty()) {
+                player.playQueue(remote.songs, remote.currentIndex, source = "Navidrome Queue")
+                if (remote.positionMs > 0L) player.seekTo(remote.positionMs)
+            }
+        }
+    }
+
+    fun insertSonicJourneyTo(targetMediaId: String) {
+        val currentId = snapshot.value.songId ?: return
+        val targetId = targetMediaId.toLongOrNull() ?: return
+        viewModelScope.launch {
+            val allSongs = libraryRepository.songs.first()
+            val startSong = allSongs.firstOrNull { it.id == currentId } ?: return@launch
+            val endSong = allSongs.firstOrNull { it.id == targetId } ?: return@launch
+            val path = navidrome.findSonicJourney(startSong, endSong)
+            if (path.isNotEmpty()) {
+                player.playNext(path.map { it.song })
+            }
+        }
+    }
+
+    fun saveBookmark(note: String) {
+        val songId = snapshot.value.songId ?: return
+        val pos = progress.value.positionMs
+        viewModelScope.launch {
+            val song = libraryRepository.songs.first().firstOrNull { it.id == songId } ?: return@launch
+            navidrome.saveBookmark(song, pos, note)
+        }
+    }
+
+    fun deleteBookmark() {
+        val songId = snapshot.value.songId ?: return
+        viewModelScope.launch { navidrome.deleteBookmark(songId) }
+    }
+
+    fun toggleJukebox(active: Boolean) {
+        viewModelScope.launch {
+            navidrome.setJukeboxActive(active)
+            if (active) {
+                val ids = queue.value.items.map { it.songId }
+                val allSongs = libraryRepository.songs.first().associateBy { it.id }
+                val songs = ids.mapNotNull { allSongs[it] }
+                if (songs.isNotEmpty()) navidrome.controlJukebox("set", songs = songs)
+            }
+        }
+    }
+
+    fun sendJukeboxCommand(action: String, gain: Float? = null) {
+        viewModelScope.launch { navidrome.controlJukebox(action, gain = gain) }
+    }
 }

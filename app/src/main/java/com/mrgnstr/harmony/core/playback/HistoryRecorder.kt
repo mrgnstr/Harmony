@@ -16,6 +16,7 @@ internal class HistoryRecorder(
     private val player: Player,
     private val dao: HistoryDao,
     writeScope: CoroutineScope,
+    private val onScrobble: (suspend (songId: Long, playedAtMs: Long) -> Unit)? = null,
 ) {
     /** One consumer, so plays are written in the order they happened. */
     private val plays = Channel<Long>(Channel.UNLIMITED)
@@ -40,7 +41,13 @@ internal class HistoryRecorder(
     }
 
     init {
-        writeScope.launch { for (songId in plays) dao.record(songId, System.currentTimeMillis(), Keep) }
+        writeScope.launch {
+            for (songId in plays) {
+                val now = System.currentTimeMillis()
+                dao.record(songId, now, Keep)
+                onScrobble?.invoke(songId, now)
+            }
+        }
         player.addListener(listener)
     }
 

@@ -3,7 +3,6 @@ package com.mrgnstr.harmony.feature.home
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,17 +11,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -33,15 +26,15 @@ import com.mrgnstr.harmony.core.data.FAVOURITES_NAME
 import com.mrgnstr.harmony.core.data.FavouritesRepository
 import com.mrgnstr.harmony.core.data.HistoryRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
-import com.mrgnstr.harmony.core.data.PlaylistRepository
+import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.database.AlbumKey
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.bleedSides
-import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
 import com.mrgnstr.harmony.core.designsystem.components.AlbumGridPage
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
+import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.components.SectionHeading
 import com.mrgnstr.harmony.core.designsystem.components.ShelfTileWidth
@@ -53,9 +46,14 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.FAVOURITES_PLAYLIST_ID
 import com.mrgnstr.harmony.core.model.HomeShelf
-import com.mrgnstr.harmony.core.model.Playlist
+import com.mrgnstr.harmony.core.model.RadioStation
 import com.mrgnstr.harmony.core.model.Song
 import com.mrgnstr.harmony.core.playback.PlayerConnection
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +62,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
 private const val RecentAlbumsLimit = 20
 private const val FavouriteSongsLimit = 5
@@ -75,32 +72,30 @@ data class HomeUiState(
     val favouriteSongs: List<Song> = emptyList(),
     val allFavouriteSongs: List<Song> = emptyList(),
     val favouriteAlbums: List<Album> = emptyList(),
+    val radioStations: List<RadioStation> = emptyList(),
     val albums: List<Album> = emptyList(),
     val playingId: Long? = null,
     val loading: Boolean = true,
     val hasLibrary: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = recentAlbums.isEmpty() && favouriteSongs.isEmpty() && favouriteAlbums.isEmpty()
+    val isEmpty: Boolean get() = recentAlbums.isEmpty() && favouriteSongs.isEmpty() && favouriteAlbums.isEmpty() && radioStations.isEmpty()
 }
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     library: LibraryRepository,
     history: HistoryRepository,
-    private val favourites: FavouritesRepository,
-    private val playlistRepository: PlaylistRepository,
+    favourites: FavouritesRepository,
+    navidrome: NavidromeRepository,
     private val player: PlayerConnection,
 ) : ViewModel() {
-    val playlists: StateFlow<List<Playlist>> = playlistRepository.playlists
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     val state: StateFlow<HomeUiState> = combine(
         combine(library.albums, library.songs, library.syncState) { a, s, sync -> Triple(a, s, sync) },
         combine(history.entries, history.playStats) { e, stats -> e to stats },
-        favourites.entries,
-        favourites.albums,
+        combine(favourites.entries, favourites.albums) { fe, fa -> fe to fa },
+        navidrome.radios,
         player.state,
-    ) { (albums, songs, sync), (played, playStats), favEntries, favAlbumKeys, playback ->
+    ) { (albums, songs, sync), (played, playStats), (favEntries, favAlbumKeys), radios, playback ->
         val byKey = albums.associateBy { AlbumKey(it.id, it.title) }
         val recent = LinkedHashSet<Album>(RecentAlbumsLimit)
         for (i in played.lastIndex downTo 0) {
@@ -127,10 +122,11 @@ class HomeViewModel @Inject constructor(
             favouriteSongs = allFavSongs.take(FavouriteSongsLimit),
             allFavouriteSongs = allFavSongs,
             favouriteAlbums = favAlbums,
+            radioStations = radios,
             albums = albums,
             playingId = playback.mediaId?.toLongOrNull(),
             loading = !sync.completedOnce && !sync.failed && albums.isEmpty() && songs.isEmpty(),
-            hasLibrary = albums.isNotEmpty() || songs.isNotEmpty(),
+            hasLibrary = albums.isNotEmpty() || songs.isNotEmpty() || radios.isNotEmpty(),
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -139,16 +135,8 @@ class HomeViewModel @Inject constructor(
         if (index in songs.indices) player.playQueue(songs, index, source = FAVOURITES_NAME)
     }
 
-    fun playNext(song: Song) = player.playNext(listOf(song))
-    fun addToQueue(song: Song) = player.playLast(listOf(song))
-    fun toggleFavouriteSong(song: Song) { viewModelScope.launch { favourites.toggleSong(song.id) } }
-
-    fun addToPlaylist(playlistId: Long, songs: List<Song>) {
-        viewModelScope.launch { playlistRepository.addSongs(playlistId, songs.map { it.id }) }
-    }
-
-    fun addToNewPlaylist(name: String, songs: List<Song>) {
-        viewModelScope.launch { playlistRepository.create(name, songIds = songs.map { it.id }) }
+    fun playRadio(station: RadioStation) {
+        player.playRadio(station)
     }
 }
 
@@ -167,7 +155,6 @@ fun HomeRoute(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
 
     TopBarScaffold(
         title = "Home",
@@ -211,20 +198,14 @@ fun HomeRoute(
                         key = { _, s -> "fav-song:${s.id}" },
                         contentType = { _, _ -> "song" },
                     ) { index, song ->
-                        HomeSongRow(
+                        val subtitle = remember(song.artist, song.album) {
+                            listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
+                        }
+                        SongRow(
                             song = song,
+                            onClick = { viewModel.playFavourite(index) },
+                            subtitle = subtitle,
                             playing = song.id == state.playingId,
-                            onPlay = { viewModel.playFavourite(index) },
-                            onPlayNext = { viewModel.playNext(song) },
-                            onAddToQueue = { viewModel.addToQueue(song) },
-                            onAddToPlaylist = { playlistFor = listOf(song) },
-                            onRemoveFavourite = { viewModel.toggleFavouriteSong(song) },
-                            onOpenAlbum = {
-                                val album = state.albums.firstOrNull { it.id == song.albumId && it.title == song.album }
-                                    ?: Album(song.albumId, song.album, song.albumArtist, song.id, 1, song.dateAddedSec, song.durationMs, song.year)
-                                onOpenAlbum(album)
-                            },
-                            onOpenArtist = { onOpenArtist(song.artist) },
                             modifier = itemMotion(),
                         )
                     }
@@ -236,18 +217,37 @@ fun HomeRoute(
                     onMore = { onOpenShelf(HomeShelf.FavouriteAlbums) },
                     onOpenAlbum = onOpenAlbum,
                 )
+                if (state.radioStations.isNotEmpty()) {
+                    item(key = "radio:heading", contentType = "heading") {
+                        SectionHeading("Internet Radio")
+                    }
+                    item(key = "radio:row", contentType = "shelf") {
+                        val sides = LocalSideInsets.current
+                        val rowState = rememberLazyListState()
+                        LazyRow(
+                            modifier = Modifier.bleedSides(sides),
+                            state = rowState,
+                            flingBehavior = rememberSnapFlingBehavior(rowState, SnapPosition.Start),
+                            contentPadding = sides.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(state.radioStations, key = { "radio:${it.id}" }, contentType = { "radio" }) { station ->
+                                ArtworkTile(
+                                    title = station.name,
+                                    subtitle = station.homePageUrl ?: "Live Stream",
+                                    onClick = { viewModel.playRadio(station) },
+                                    modifier = itemMotion().width(ShelfTileWidth),
+                                ) { artMod ->
+                                    Box(artMod.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                                        SymbolIcon(Symbols.Radio, null, size = 48.dp, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
-
-    playlistFor?.let { songs ->
-        val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-        AddToPlaylistSheet(
-            playlists,
-            onPick = { viewModel.addToPlaylist(it.id, songs); playlistFor = null },
-            onCreate = { viewModel.addToNewPlaylist(it, songs); playlistFor = null },
-            onDismiss = { playlistFor = null },
-        )
     }
 }
 
@@ -274,68 +274,6 @@ private fun LazyListScope.albumShelf(
         ) {
             items(albums, key = { "$key:${it.id}:${it.title}" }, contentType = { "album" }) { album ->
                 AlbumTile(album, onClick = { onOpenAlbum(album) }, modifier = itemMotion().width(ShelfTileWidth))
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeSongRow(
-    song: Song,
-    playing: Boolean,
-    onPlay: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onRemoveFavourite: () -> Unit,
-    onOpenAlbum: () -> Unit,
-    onOpenArtist: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val subtitle = remember(song.artist, song.album) {
-        listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
-    }
-    Box(modifier) {
-        SongRow(
-            song = song,
-            onClick = onPlay,
-            subtitle = subtitle,
-            playing = playing,
-            onMore = { menuOpen = true },
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play next") },
-                    leadingIcon = { SymbolIcon(Symbols.PlayNext, null) },
-                    onClick = { menuOpen = false; onPlayNext() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to queue") },
-                    leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) },
-                    onClick = { menuOpen = false; onAddToQueue() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) },
-                    onClick = { menuOpen = false; onAddToPlaylist() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Remove from favourites") },
-                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = 1f) },
-                    onClick = { menuOpen = false; onRemoveFavourite() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Go to album") },
-                    leadingIcon = { SymbolIcon(Symbols.Album, null) },
-                    onClick = { menuOpen = false; onOpenAlbum() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Go to artist") },
-                    leadingIcon = { SymbolIcon(Symbols.Artist, null) },
-                    onClick = { menuOpen = false; onOpenArtist() },
-                )
             }
         }
     }

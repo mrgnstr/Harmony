@@ -63,6 +63,8 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import kotlinx.coroutines.delay
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalOpenAlbum
+import com.mrgnstr.harmony.core.designsystem.LocalOpenArtist
 import com.mrgnstr.harmony.core.designsystem.LocalSharedTransitionScope
 import com.mrgnstr.harmony.core.designsystem.components.CoverShare
 import com.mrgnstr.harmony.core.designsystem.components.LocalCoverShare
@@ -139,7 +141,9 @@ fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur:
     HarmonyTheme(schemes.scheme(ColorSource.Wallpaper, dark), tier, chromeBlur, coverBlur) {
         CompositionLocalProvider(LocalColorSourceRegistry provides registry) {
             val permission = rememberAudioPermissionState()
-            if (permission.granted) Shell(nav, openPlayer, schemes, dark) else OnboardingScreen(permission)
+            val connectVm: com.mrgnstr.harmony.core.designsystem.components.NavidromeConnectViewModel = hiltViewModel()
+            val activeServer by connectVm.repository.activeAccount.collectAsStateWithLifecycle()
+            if (permission.granted || activeServer != null) Shell(nav, openPlayer, schemes, dark) else OnboardingScreen(permission)
         }
     }
 }
@@ -287,7 +291,15 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     }
 
     val coverShare = remember { CoverShare() }
-    CompositionLocalProvider(LocalBottomBarInset provides bottomInset, LocalChromeBlurState provides blur, LocalCoverShare provides coverShare) {
+    val openAlbumGlobal = remember(nav) { { album: com.mrgnstr.harmony.core.model.Album -> nav.push(Dest.Album(album.id, album.title)); Unit } }
+    val openArtistGlobal = remember(nav) { { artist: String -> nav.push(Dest.Artist(artist)); Unit } }
+    CompositionLocalProvider(
+        LocalBottomBarInset provides bottomInset,
+        LocalChromeBlurState provides blur,
+        LocalCoverShare provides coverShare,
+        LocalOpenAlbum provides openAlbumGlobal,
+        LocalOpenArtist provides openArtistGlobal,
+    ) {
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this) {
                 Box(Modifier.fillMaxSize().onSizeChanged { rootHeightPx = it.height.toFloat() }) {

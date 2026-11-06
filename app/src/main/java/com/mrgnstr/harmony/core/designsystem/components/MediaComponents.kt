@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,11 +29,16 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -66,7 +72,7 @@ fun gridCellPadding(column: Int, columns: Int): PaddingValues {
     return PaddingValues(start = start, end = share - start)
 }
 
-/** A square artwork tile with one or two lines under it; squishes when pressed. */
+/** A square artwork tile with one or two lines under it; squishes when pressed and triggers haptics on long-press. */
 @Composable
 fun ArtworkTile(
     title: String,
@@ -75,49 +81,88 @@ fun ArtworkTile(
     modifier: Modifier = Modifier,
     circular: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    menu: @Composable () -> Unit = {},
     artwork: @Composable (Modifier) -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    Column(
-        modifier
-            .pressResponse(interaction, pressedScale = 0.95f)
-            .combinedClickable(interaction, indication = null, onLongClick = onLongClick, onClick = onClick),
-        horizontalAlignment = if (circular) Alignment.CenterHorizontally else Alignment.Start,
-    ) {
-        artwork(Modifier.fillMaxWidth().aspectRatio(1f).clip(if (circular) CircleShape else TileCoverShape))
-        Text(
-            title,
-            Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp),
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = if (circular) TextAlign.Center else TextAlign.Start,
-        )
-        if (subtitle != null) {
+    val haptics = LocalHapticFeedback.current
+    Box(modifier) {
+        Column(
+            Modifier
+                .pressResponse(interaction, pressedScale = 0.95f)
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onLongClick = if (onLongClick != null) {
+                        {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongClick()
+                        }
+                    } else null,
+                    onClick = onClick,
+                ),
+            horizontalAlignment = if (circular) Alignment.CenterHorizontally else Alignment.Start,
+        ) {
+            artwork(Modifier.fillMaxWidth().aspectRatio(1f).clip(if (circular) CircleShape else TileCoverShape))
             Text(
-                subtitle,
-                Modifier.padding(horizontal = 2.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                title,
+                Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp),
+                style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = if (circular) TextAlign.Center else TextAlign.Start,
             )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    Modifier.padding(horizontal = 2.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
+        menu()
     }
 }
 
-/** An album tile. Opening it lends its cover to the album page (see [sharedCover]). */
+/** An album tile. Opening it lends its cover to the album page (see [sharedCover]); holding down opens its context menu. */
 @Composable
-fun AlbumTile(album: Album, onClick: () -> Unit, modifier: Modifier = Modifier, subtitle: String? = album.artist) {
+fun AlbumTile(
+    album: Album,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = album.artist,
+    showGoToArtist: Boolean = true,
+) {
     val share = LocalCoverShare.current
     val owner = remember { Any() }
     val key = albumCoverKey(album.id, album.title)
-    ArtworkTile(album.title, subtitle, { share?.claim(key, owner); onClick() }, modifier) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var menuInitialized by remember { mutableStateOf(false) }
+    ArtworkTile(
+        title = album.title,
+        subtitle = subtitle,
+        onClick = { share?.claim(key, owner); onClick() },
+        modifier = modifier,
+        onLongClick = { menuInitialized = true; menuOpen = true },
+        menu = {
+            if (menuInitialized) {
+                AlbumContextMenu(
+                    album = album,
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
+                    showGoToArtist = showGoToArtist,
+                )
+            }
+        },
+    ) {
         ArtworkImage(album.artSongId, album.id, it.sharedCover(key, owner))
     }
 }
 
-/** A song row: thumbnail, title / subtitle, overflow button. [playing] tints the title. */
+/** A song row: thumbnail, title / subtitle, overflow button, and long-press / overflow centered context menu. [playing] tints the title. */
 @Composable
 fun SongRow(
     song: Song,
@@ -125,25 +170,51 @@ fun SongRow(
     modifier: Modifier = Modifier,
     subtitle: String = song.artist,
     playing: Boolean = false,
+    showGoToAlbum: Boolean = true,
+    showGoToArtist: Boolean = true,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = { ArtworkImage(song.id, song.albumId, Modifier.size(48.dp).clip(RowCoverShape)) },
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var menuInitialized by remember { mutableStateOf(false) }
+    val openMenu = {
+        if (onMore != null) {
+            onMore()
+        } else {
+            menuInitialized = true
+            menuOpen = true
+        }
+    }
     MediaRow(
         title = song.title,
         subtitle = subtitle,
         onClick = onClick,
         modifier = modifier,
         titleColor = if (playing) MaterialTheme.colorScheme.primary else Color.Unspecified,
+        onLongClick = openMenu,
         leading = leading,
         trailing = {
-            if (onMore != null) {
-                IconButton(onClick = onMore) { SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = openMenu) {
+                SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        menu = {
+            if (menuInitialized) {
+                SongContextMenu(
+                    song = song,
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
+                    showGoToAlbum = showGoToAlbum,
+                    showGoToArtist = showGoToArtist,
+                    onRemoveFromPlaylist = onRemoveFromPlaylist,
+                )
             }
         },
     )
 }
 
-/** Row with optional leading art, one or two text lines and a trailing slot. */
+/** Row with optional leading art, one or two text lines, a trailing slot, and optional long-press / context menu. */
 @Composable
 fun MediaRow(
     title: String,
@@ -151,34 +222,48 @@ fun MediaRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     titleColor: Color = Color.Unspecified,
+    onLongClick: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
+    menu: @Composable () -> Unit = {},
 ) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (leading != null) {
-            leading()
-            Spacer(Modifier.width(16.dp))
-        }
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+    val haptics = LocalHapticFeedback.current
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = if (onLongClick != null) {
+                        {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongClick()
+                        }
+                    } else null,
                 )
+                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leading != null) {
+                leading()
+                Spacer(Modifier.width(16.dp))
             }
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle != null) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            trailing()
         }
-        trailing()
+        menu()
     }
 }
 

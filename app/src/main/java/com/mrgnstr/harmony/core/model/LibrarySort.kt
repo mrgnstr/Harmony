@@ -11,6 +11,7 @@ enum class SortKey(val label: String, val descendingFirst: Boolean = false) {
     Updated("Recently Updated", descendingFirst = true),
     RecentlyPlayed("Recently Played", descendingFirst = true),
     PlayCount("Play Count", descendingFirst = true),
+    Rating("Rating", descendingFirst = true),
     Duration("Duration", descendingFirst = true),
     TrackCount("Track Count", descendingFirst = true),
 }

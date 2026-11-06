@@ -33,8 +33,29 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE albumId = :albumId AND album = :album ORDER BY discNumber, trackNumber, title COLLATE NOCASE")
     fun observeAlbumSongs(albumId: Long, album: String): Flow<List<SongEntity>>
 
-    @Query("SELECT id, dateModifiedSec, genre, year, lossless FROM songs")
+    @Query("SELECT id, dateModifiedSec, genre, year, lossless FROM songs WHERE serverId = 0")
     suspend fun stamps(): List<SongStamp>
+
+    @Query("SELECT id, dateModifiedSec, genre, year, lossless FROM songs WHERE serverId = :serverId")
+    suspend fun remoteStamps(serverId: Long): List<SongStamp>
+
+    @Query("SELECT * FROM songs WHERE id = :id")
+    suspend fun getById(id: Long): SongEntity?
+
+    @Query("SELECT * FROM songs WHERE serverId = :serverId AND remoteId = :remoteId LIMIT 1")
+    suspend fun getByRemoteId(serverId: Long, remoteId: String): SongEntity?
+
+    @Query("UPDATE songs SET userRating = :rating WHERE id = :id")
+    suspend fun updateRating(id: Long, rating: Int)
+
+    @Query("UPDATE songs SET downloadedPath = :path WHERE id = :id")
+    suspend fun updateDownloadedPath(id: Long, path: String?)
+
+    @Query("UPDATE songs SET bookmarkPositionMs = :positionMs WHERE id = :id")
+    suspend fun updateBookmarkPosition(id: Long, positionMs: Long)
+
+    @Query("DELETE FROM songs WHERE serverId = :serverId")
+    suspend fun deleteByServerId(serverId: Long)
 
     @Upsert
     suspend fun upsert(songs: List<SongEntity>)

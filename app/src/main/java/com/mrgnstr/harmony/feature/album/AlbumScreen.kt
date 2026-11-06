@@ -48,7 +48,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -64,6 +66,8 @@ import com.mrgnstr.harmony.core.designsystem.blur.rememberChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
+import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
+import com.mrgnstr.harmony.core.designsystem.components.NavidromeShareSheet
 import com.mrgnstr.harmony.core.designsystem.components.albumCoverKey
 import com.mrgnstr.harmony.core.designsystem.components.sharedCover
 import com.mrgnstr.harmony.core.designsystem.components.DetailTopBar
@@ -121,6 +125,7 @@ fun AlbumRoute(
 
     // Songs waiting for a playlist to be picked (a track, or the whole album).
     var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
+    var showShareSheet by remember { mutableStateOf(false) }
 
     // Everything the page draws, the top bar and its menu included, takes the theme's text colour: without it text and icons fall back to
     // the light theme's black in dark mode.
@@ -145,7 +150,7 @@ fun AlbumRoute(
                     // Composing the rest while the page is still flying in costs frames; it follows once the transition has settled.
                     if (settled) {
                         trackList(state, viewModel, onOpenArtist) { playlistFor = it }
-                        item(key = "info", contentType = "info") { InfoCard(state) }
+                        item(key = "info", contentType = "info") { InfoCard(state, onOpenArtist) }
                         if (state.otherVersions.isNotEmpty()) shelf("versions", "Other Versions", state.otherVersions, { onOpenShelf(AlbumReleaseShelf.OtherVersions, state.accent) }, onOpenAlbum)
                         if (state.moreByArtist.isNotEmpty()) {
                             shelf("more", "More by ${state.artist}", state.moreByArtist, { onOpenShelf(AlbumReleaseShelf.MoreByArtist, state.accent) }, onOpenAlbum)
@@ -182,6 +187,23 @@ fun AlbumRoute(
                         leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (state.favouriteAlbum) 1f else 0f) },
                         onClick = { close(); viewModel.toggleFavouriteAlbum() },
                     )
+                    if (albumId < 0L) {
+                        DropdownMenuItem(
+                            text = { Text("Download album") },
+                            leadingIcon = { SymbolIcon(Symbols.Download, null) },
+                            onClick = { close(); viewModel.downloadAlbum() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share via Navidrome") },
+                            leadingIcon = { SymbolIcon(Symbols.Share, null) },
+                            onClick = { close(); showShareSheet = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Refresh server metadata") },
+                            leadingIcon = { SymbolIcon(Symbols.Refresh, null) },
+                            onClick = { close(); viewModel.refreshServerMetadata() },
+                        )
+                    }
                 },
             )
         }
@@ -192,6 +214,13 @@ fun AlbumRoute(
                 onPick = { viewModel.addToPlaylist(it.id, songs); playlistFor = null },
                 onCreate = { viewModel.addToNewPlaylist(it, songs); playlistFor = null },
                 onDismiss = { playlistFor = null },
+            )
+        }
+        if (showShareSheet) {
+            NavidromeShareSheet(
+                title = "${state.artist} - ${state.title}",
+                onDismiss = { showShareSheet = false },
+                onCreateShare = { desc, dl -> viewModel.createShare(desc, dl) },
             )
         }
     }
@@ -265,9 +294,12 @@ private fun Tag(text: String, icon: FormatIcon?) {
 
 private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewModel, onOpenArtist: (String) -> Unit, onAddToPlaylist: (List<Song>) -> Unit) {
     val songs = state.songs
+    val discTitleMap = state.remoteExtra?.discTitles?.associate { it.disc to it.title }.orEmpty()
     songs.forEachIndexed { index, song ->
         if (state.hasMultipleDiscs && (index == 0 || songs[index - 1].discNumber != song.discNumber)) {
-            item(key = "disc:${song.discNumber}", contentType = "disc") { DiscHeader(song.discNumber.coerceAtLeast(1)) }
+            val dNum = song.discNumber.coerceAtLeast(1)
+            val subtitle = discTitleMap[dNum]?.takeIf { it.isNotBlank() } ?: song.discSubtitle?.takeIf { it.isNotBlank() }
+            item(key = "disc:$dNum", contentType = "disc") { DiscHeader(dNum, subtitle) }
         }
         item(key = "song:${song.id}", contentType = "track") {
             TrackRow(
@@ -284,10 +316,11 @@ private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewMod
 }
 
 @Composable
-private fun DiscHeader(number: Int) {
+private fun DiscHeader(number: Int, subtitle: String? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         SymbolIcon(Symbols.Album, null, size = 20.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Disc $number", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val label = if (!subtitle.isNullOrBlank()) "Disc $number · $subtitle" else "Disc $number"
+        Text(label, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -307,42 +340,50 @@ private fun TrackRow(
     onOpenArtist: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
     val accent = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).combinedClickable(onLongClick = { menu = true }, onClick = onClick)
-            .padding(start = 20.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) {
-            if (playing) SymbolIcon(Symbols.GraphicEq, "Playing", size = 20.dp, tint = accent)
-            else Text((song.trackNumber.takeIf { it > 0 } ?: position).toString(), style = MaterialTheme.typography.bodyLarge, color = muted)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                song.title, style = MaterialTheme.typography.bodyLarge, color = if (playing) accent else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            // The artist line only appears when it differs from the album's (features, compilations).
-            if (!song.artist.equals(albumArtist, ignoreCase = true)) {
-                Text(song.artist, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (favourite) SymbolIcon(Symbols.Favorite, "Favourite", Modifier.padding(start = 8.dp), size = 16.dp, tint = accent, fill = 1f)
-        Text(clock(song.durationMs), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium, color = muted)
-        Box {
-            IconButton({ menu = true }) { SymbolIcon(Symbols.MoreVert, "More", tint = muted) }
-            DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text("Play next") }, leadingIcon = { SymbolIcon(Symbols.PlayNext, null) }, onClick = { menu = false; onPlayNext() })
-                DropdownMenuItem(text = { Text("Add to queue") }, leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) }, onClick = { menu = false; onAddToQueue() })
-                DropdownMenuItem(text = { Text("Add to playlist") }, leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) }, onClick = { menu = false; onAddToPlaylist() })
-                DropdownMenuItem(
-                    text = { Text(if (favourite) "Remove from favourites" else "Favourite") },
-                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
-                    onClick = { menu = false; onToggleFavourite() },
+    Box {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                .combinedClickable(
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        menu = true
+                    },
+                    onClick = onClick,
                 )
-                DropdownMenuItem(text = { Text("Go to artist") }, leadingIcon = { SymbolIcon(Symbols.Artist, null) }, onClick = { menu = false; onOpenArtist() })
+                .padding(start = 20.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) {
+                if (playing) SymbolIcon(Symbols.GraphicEq, "Playing", size = 20.dp, tint = accent)
+                else Text((song.trackNumber.takeIf { it > 0 } ?: position).toString(), style = MaterialTheme.typography.bodyLarge, color = muted)
             }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    song.title, style = MaterialTheme.typography.bodyLarge, color = if (playing) accent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                // The artist line only appears when it differs from the album's (features, compilations).
+                if (!song.artist.equals(albumArtist, ignoreCase = true)) {
+                    Text(song.artist, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (favourite) SymbolIcon(Symbols.Favorite, "Favourite", Modifier.padding(start = 8.dp), size = 16.dp, tint = accent, fill = 1f)
+            Text(clock(song.durationMs), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium, color = muted)
+            IconButton({ menu = true }) { SymbolIcon(Symbols.MoreVert, "More", tint = muted) }
+        }
+        CenteredDropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem(text = { Text("Play next") }, leadingIcon = { SymbolIcon(Symbols.PlayNext, null) }, onClick = { menu = false; onPlayNext() })
+            DropdownMenuItem(text = { Text("Add to queue") }, leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) }, onClick = { menu = false; onAddToQueue() })
+            DropdownMenuItem(text = { Text("Add to playlist") }, leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) }, onClick = { menu = false; onAddToPlaylist() })
+            DropdownMenuItem(
+                text = { Text(if (favourite) "Remove from favourites" else "Favourite") },
+                leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
+                onClick = { menu = false; onToggleFavourite() },
+            )
+            DropdownMenuItem(text = { Text("Go to artist") }, leadingIcon = { SymbolIcon(Symbols.Artist, null) }, onClick = { menu = false; onOpenArtist() })
         }
     }
 }
@@ -352,23 +393,45 @@ private fun clock(ms: Long): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-/** Album length, date added, and label / copyright when the tags have them. */
+/** Album length, date added, label / copyright, and Navidrome description / participant credits when present. */
 @Composable
-private fun InfoCard(state: AlbumUiState) {
+private fun InfoCard(state: AlbumUiState, onOpenArtist: (String) -> Unit = {}) {
     val added = remember(state.addedSec) { DateFormat.getDateInstance(DateFormat.LONG).format(Date(state.addedSec * 1000)) }
     val count = state.songs.size
     val minutes = (state.durationMs / 60_000f).roundToInt().coerceAtLeast(1)
     val length = if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes ${if (minutes == 1) "minute" else "minutes"}"
+    val extra = state.remoteExtra
     Surface(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            extra?.description?.takeIf { it.isNotBlank() }?.let { InfoRow("About", it) }
             InfoRow("Length", "$length · $count ${if (count == 1) "song" else "songs"}")
             InfoRow("Added", added)
+            extra?.releaseDate?.takeIf { it.isNotBlank() }?.let { InfoRow("Released", it) }
+            extra?.originalReleaseDate?.takeIf { it.isNotBlank() && it != extra.releaseDate }?.let { InfoRow("Original Release", it) }
+            extra?.version?.takeIf { it.isNotBlank() }?.let { InfoRow("Edition", it) }
             state.credits?.label?.let { InfoRow("Label", it) }
+            extra?.catalogNum?.takeIf { it.isNotBlank() }?.let { InfoRow("Catalog #", it) }
             state.credits?.copyright?.let { InfoRow("Copyright", it) }
+            val creditsByRole = remember(extra?.participants) {
+                extra?.participants?.filter { !it.role.equals("albumartist", ignoreCase = true) }
+                    ?.groupBy { it.displayRole }.orEmpty()
+            }
+            creditsByRole.forEach { (role, list) ->
+                val names = list.map { it.name }.distinct()
+                Column {
+                    Text(role, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        names.joinToString(", "),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { names.firstOrNull()?.let(onOpenArtist) },
+                    )
+                }
+            }
         }
     }
 }

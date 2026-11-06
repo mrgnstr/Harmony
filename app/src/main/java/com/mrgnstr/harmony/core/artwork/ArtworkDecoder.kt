@@ -26,9 +26,49 @@ object ArtworkDecoder {
     /** Cached sizes: a request is served from (and stored at) the next size up, so a few files cover every tile size. */
     private val BUCKETS = intArrayOf(96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048)
 
+    suspend fun decodeAsync(context: Context, songId: Long, albumId: Long, targetPx: Int): Bitmap? {
+        if (songId < 0L || albumId < 0L) {
+            return decodeRemote(context, songId, albumId, targetPx)
+        }
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            decode(context, songId, albumId, targetPx)
+        }
+    }
+
+    private suspend fun decodeRemote(context: Context, songId: Long, albumId: Long, targetPx: Int): Bitmap? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val px = targetPx.coerceIn(16, 2048)
+            val id = if (albumId != 0L) "a$albumId" else "s$songId"
+            val dir = File(context.cacheDir, CACHE_DIR).apply { mkdirs() }
+            val bucket = BUCKETS.firstOrNull { it >= px } ?: BUCKETS.last()
+            val cached = File(dir, "$id-$bucket")
+            readCached(cached)?.let { return@withContext it }
+
+            val entry = RemoteArtworkBridge.entryFor(songId, albumId)
+            val coverArtId = entry?.coverArtId
+            val fetcher = RemoteArtworkBridge.remoteByteFetcher
+            if (!coverArtId.isNullOrBlank() && fetcher != null) {
+                val bytes = runCatching { fetcher.invoke(coverArtId, bucket) }.getOrNull()
+                if (bytes != null && bytes.isNotEmpty()) {
+                    val bitmap = decodeSampled(bytes, bucket)
+                    if (bitmap != null) {
+                        writeCached(dir, cached, bitmap)
+                        return@withContext bitmap
+                    }
+                }
+            }
+            RemoteArtworkBridge.decodeThumbHashFallback(songId, albumId)
+        }
+
     fun decode(context: Context, songId: Long, albumId: Long, targetPx: Int): Bitmap? {
         val px = targetPx.coerceIn(16, 2048)
-        val id = if (albumId > 0) "a$albumId" else "s$songId"
+        val id = if (albumId != 0L) "a$albumId" else "s$songId"
+        if (songId < 0L || albumId < 0L) {
+            val dir = File(context.cacheDir, CACHE_DIR).apply { mkdirs() }
+            val bucket = BUCKETS.firstOrNull { it >= px } ?: BUCKETS.last()
+            readCached(File(dir, "$id-$bucket"))?.let { return it }
+            return kotlinx.coroutines.runBlocking { decodeRemote(context, songId, albumId, targetPx) }
+        }
         // The embedded picture first: the system's album thumbnails can be small or built from a low-resolution copy. Reading it
         // means opening the song file (100+ ms on a fast phone), so the scaled result is kept on disk, and so is "this one has none".
         val dir = File(context.cacheDir, CACHE_DIR).apply { mkdirs() }

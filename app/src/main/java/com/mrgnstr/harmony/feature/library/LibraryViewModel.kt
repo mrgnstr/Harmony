@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.data.ArtistImageStore
 import com.mrgnstr.harmony.core.data.HistoryRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
+import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.data.PlaylistRepository
 import com.mrgnstr.harmony.core.database.PlayCount
 import com.mrgnstr.harmony.core.datastore.SettingsStore
@@ -12,8 +13,10 @@ import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.ArtRef
 import com.mrgnstr.harmony.core.model.Artist
 import com.mrgnstr.harmony.core.model.GenreCard
+import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.Playlist
 import com.mrgnstr.harmony.core.model.LibrarySort
+import com.mrgnstr.harmony.core.model.SmartPlaylistCriteria
 import com.mrgnstr.harmony.core.model.SortKey
 import com.mrgnstr.harmony.core.model.Song
 import com.mrgnstr.harmony.core.model.heroOf
@@ -37,12 +40,12 @@ enum class LibraryTab(val label: String, val keys: List<SortKey>, val default: L
     RecentlyAdded("Recently Added", emptyList(), LibrarySort(SortKey.DateAdded)),
     Albums(
         "Albums",
-        listOf(SortKey.Title, SortKey.Artist, SortKey.Year, SortKey.DateAdded, SortKey.RecentlyPlayed, SortKey.PlayCount, SortKey.Duration, SortKey.TrackCount),
+        listOf(SortKey.Title, SortKey.Artist, SortKey.Year, SortKey.DateAdded, SortKey.RecentlyPlayed, SortKey.PlayCount, SortKey.Rating, SortKey.Duration, SortKey.TrackCount),
         LibrarySort(SortKey.Title),
     ),
     Songs(
         "Songs",
-        listOf(SortKey.Title, SortKey.Artist, SortKey.AlbumArtist, SortKey.Album, SortKey.Year, SortKey.DateAdded, SortKey.RecentlyPlayed, SortKey.PlayCount, SortKey.Duration),
+        listOf(SortKey.Title, SortKey.Artist, SortKey.AlbumArtist, SortKey.Album, SortKey.Year, SortKey.DateAdded, SortKey.RecentlyPlayed, SortKey.PlayCount, SortKey.Rating, SortKey.Duration),
         LibrarySort(SortKey.Title),
     ),
     Artists(
@@ -71,9 +74,20 @@ class LibraryViewModel @Inject constructor(
     history: HistoryRepository,
     imageStore: ArtistImageStore,
     private val playlistRepository: PlaylistRepository,
+    val navidrome: NavidromeRepository,
     private val settings: SettingsStore,
     private val player: PlayerConnection,
 ) : ViewModel() {
+    val sourceMode: StateFlow<LibrarySourceMode> = settings.librarySourceMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, LibrarySourceMode.All)
+
+    val hasNavidrome: StateFlow<Boolean> = navidrome.activeAccount
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setSourceMode(mode: LibrarySourceMode) {
+        viewModelScope.launch { settings.setLibrarySourceMode(mode) }
+    }
     val sorts: StateFlow<Map<LibraryTab, LibrarySort>> = settings.librarySorts
         .map { saved -> LibraryTab.entries.associateWith { tab -> saved[tab.name]?.takeIf { it.key in tab.keys } ?: tab.default } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryTab.entries.associateWith { it.default })
@@ -81,6 +95,9 @@ class LibraryViewModel @Inject constructor(
     /** The first scan of this launch has not finished: an empty page is still filling in, not empty. */
     val loading: StateFlow<Boolean> = library.syncState.map { !it.completedOnce && !it.failed }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val playingId: StateFlow<Long?> = player.state.map { it.mediaId?.toLongOrNull() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun setSort(tab: LibraryTab, sort: LibrarySort) { viewModelScope.launch { settings.setLibrarySort(tab.name, sort) } }
 
@@ -135,6 +152,7 @@ class LibraryViewModel @Inject constructor(
             SortKey.DateAdded -> compareBy<Song> { it.dateAddedSec }.thenBy(ci) { it.title }
             SortKey.RecentlyPlayed -> compareBy<Song> { stats.of(it)?.lastPlayedMs ?: 0L }.thenBy(ci) { it.title }
             SortKey.PlayCount -> compareBy<Song> { stats.of(it)?.count ?: 0 }.thenBy(ci) { it.title }
+            SortKey.Rating -> compareBy<Song> { it.userRating }.thenBy(ci) { it.title }
             SortKey.Duration -> compareBy<Song> { it.durationMs }.thenBy(ci) { it.title }
             else -> compareBy(ci) { it.title }
         }
@@ -187,6 +205,10 @@ class LibraryViewModel @Inject constructor(
 
     fun createPlaylist(name: String, coverUri: String?, onCreated: (Long) -> Unit = {}) {
         viewModelScope.launch { onCreated(playlistRepository.create(name.ifBlank { "New Playlist" }, coverUri)) }
+    }
+
+    fun createSmartPlaylist(name: String, comment: String, isPublic: Boolean, criteria: SmartPlaylistCriteria) {
+        viewModelScope.launch { navidrome.createSmartPlaylist(name, comment, isPublic, criteria) }
     }
 
     fun editPlaylist(playlist: Playlist, name: String, coverUri: String?, clearCover: Boolean) {

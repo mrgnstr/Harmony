@@ -15,6 +15,18 @@ data class PlaylistEntity(
     val coverPath: String?,
     val createdAtMs: Long,
     val updatedAtMs: Long,
+    @ColumnInfo(defaultValue = "0") val serverId: Long = 0L,
+    val remoteId: String? = null,
+    val comment: String? = null,
+    @ColumnInfo(defaultValue = "0") val isPublic: Boolean = false,
+    val owner: String? = null,
+    @ColumnInfo(defaultValue = "0") val isSmart: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val readonly: Boolean = false,
+    val validUntilMs: Long? = null,
+    val rulesJson: String? = null,
+    val coverArtId: String? = null,
+    @ColumnInfo(defaultValue = "0") val userRating: Int = 0,
+    @ColumnInfo(defaultValue = "0") val starred: Boolean = false,
 )
 
 /**

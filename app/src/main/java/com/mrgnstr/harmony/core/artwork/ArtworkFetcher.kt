@@ -21,7 +21,7 @@ class ArtworkFetcher(private val key: ArtworkKey, private val options: Options) 
     override suspend fun fetch(): FetchResult {
         val w = (options.size.width as? Dimension.Pixels)?.px ?: DEFAULT_PX
         val h = (options.size.height as? Dimension.Pixels)?.px ?: DEFAULT_PX
-        val bitmap = ArtworkDecoder.decode(options.context, key.songId, key.albumId, maxOf(w, h))
+        val bitmap = ArtworkDecoder.decodeAsync(options.context, key.songId, key.albumId, maxOf(w, h))
             ?: throw NoArtworkException()
         return ImageFetchResult(bitmap.asImage(), isSampled = true, dataSource = DataSource.DISK)
     }

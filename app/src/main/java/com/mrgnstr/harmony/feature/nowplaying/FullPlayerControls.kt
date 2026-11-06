@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mrgnstr.harmony.core.designsystem.icons.AnimatedSymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
@@ -90,11 +91,27 @@ internal fun FullPlayerControls(
 ) {
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.SpaceBetween) {
         val c = LocalCoverColors.current
+        var showLyrics by remember { mutableStateOf(false) }
+        var showQueue by remember { mutableStateOf(false) }
+        var showBookmarks by remember { mutableStateOf(false) }
+        val lyrics by vm.lyrics.collectAsStateWithLifecycle()
+        val bookmark by vm.currentBookmark.collectAsStateWithLifecycle()
+        val jukebox by vm.jukeboxState.collectAsStateWithLifecycle()
+        val hasNavidrome by vm.hasNavidrome.collectAsStateWithLifecycle()
+        val hasJukeboxRole by vm.hasJukeboxRole.collectAsStateWithLifecycle()
+
         // Title block
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 MarqueeText(snap.title, MaterialTheme.typography.headlineSmallEmphasized.copy(fontWeight = FontWeight.Bold), c.text)
-                MarqueeText(snap.artist, MaterialTheme.typography.titleMedium, c.textSoft)
+                val subLine = remember(snap.artist, snap.codec, snap.bitRateKbps, snap.isRemote) {
+                    val badge = if (snap.codec != null) {
+                        val kbps = snap.bitRateKbps.takeIf { it > 0 }?.let { " ${it}k" }.orEmpty()
+                        "${snap.codec}$kbps"
+                    } else null
+                    listOfNotNull(snap.artist.takeIf { it.isNotBlank() }, badge).joinToString(" · ")
+                }
+                MarqueeText(subLine, MaterialTheme.typography.titleMedium, c.textSoft)
             }
             val pop = rememberFlourish(bounce = 0.45f)
             ModeToggle(favourite, { pop.play(); vm.toggleFavourite() }) { blend, tint ->
@@ -125,10 +142,13 @@ internal fun FullPlayerControls(
             ) { SkipIcon(Symbols.SkipNext, "Next", nextKick, size = 32.dp) }
         }
 
-        // Modes: the same button shape as the favourite toggle
+        // Modes & overlays: Lyrics, Shuffle, Repeat, Queue, and Bookmark/Jukebox
         val shuffleFlip = rememberFlourish(bounce = 0.8f)
         val repeatSpin = rememberFlourish(bounce = 0.8f)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+            ModeToggle(showLyrics || lyrics != null, { showLyrics = true }) { blend, tint ->
+                SymbolIcon(Symbols.Lyrics, "Lyrics", tint = tint, blendMode = blend)
+            }
             ModeToggle(queue.shuffled, { shuffleFlip.play(); vm.toggleShuffle() }) { blend, tint ->
                 // The crossing arrows flip over like a card.
                 SymbolIcon(
@@ -143,6 +163,55 @@ internal fun FullPlayerControls(
                     modifier = Modifier.graphicsLayer { rotationZ = 360f * repeatSpin.value.value },
                 )
             }
+            ModeToggle(showQueue, { showQueue = true }) { blend, tint ->
+                SymbolIcon(Symbols.QueueMusic, "Queue", tint = tint, blendMode = blend)
+            }
+            if (snap.isRemote || hasNavidrome) {
+                ModeToggle(bookmark != null || jukebox.active, { showBookmarks = true }) { blend, tint ->
+                    SymbolIcon(
+                        if (jukebox.active) Symbols.Speaker else Symbols.Bookmark,
+                        "Bookmarks & Output",
+                        tint = tint,
+                        blendMode = blend,
+                        fill = if (bookmark != null || jukebox.active) 1f else 0f,
+                    )
+                }
+            }
+        }
+
+        if (showLyrics) {
+            LyricsModalSheet(
+                lyrics = lyrics,
+                positionMs = progress.positionMs,
+                onSeek = vm::seekTo,
+                onDismiss = { showLyrics = false },
+            )
+        }
+        if (showQueue) {
+            QueueModalSheet(
+                queue = queue,
+                hasNavidrome = hasNavidrome,
+                onSkipToIndex = vm::skipToQueueIndex,
+                onRemoveIndex = vm::removeQueueItem,
+                onSonicJourneyTo = vm::insertSonicJourneyTo,
+                onSaveCloudQueue = vm::saveCloudQueue,
+                onLoadCloudQueue = vm::loadCloudQueue,
+                onDismiss = { showQueue = false },
+            )
+        }
+        if (showBookmarks) {
+            BookmarksAndJukeboxSheet(
+                bookmark = bookmark,
+                positionMs = progress.positionMs,
+                jukebox = jukebox,
+                hasJukeboxRole = hasJukeboxRole,
+                onSaveBookmark = vm::saveBookmark,
+                onJumpToBookmark = vm::seekTo,
+                onDeleteBookmark = vm::deleteBookmark,
+                onToggleJukebox = vm::toggleJukebox,
+                onJukeboxCommand = vm::sendJukeboxCommand,
+                onDismiss = { showBookmarks = false },
+            )
         }
     }
 }

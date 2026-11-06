@@ -45,11 +45,30 @@ class ArtworkColorStore @Inject constructor(
     /** Palettes already read or computed, so an album page can theme itself in its very first frame. */
     private val memory = java.util.concurrent.ConcurrentHashMap<Long, AlbumPalette>()
 
-    /** The palette if it is in memory (no waiting), else null. */
-    fun peek(albumId: Long): AlbumPalette? = memory[albumId]
+    /** The palette if it is in memory (no waiting), else Navidrome's precomputed dominantColor/thumbHash, else null. */
+    fun peek(albumId: Long): AlbumPalette? {
+        memory[albumId]?.let { return it }
+        if (albumId < 0L) {
+            RemoteArtworkBridge.dominantOrThumbColor(0L, albumId)?.let { c ->
+                return AlbumPalette(albumId, c, c, c, hasArt = true).also { memory[albumId] = it }
+            }
+        }
+        return null
+    }
+
+    /** Seeds the in-memory and Room colour cache from Navidrome's server-computed `dominantColor` / `thumbHash`. */
+    suspend fun seedRemotePalette(albumId: Long, dominantColorHex: String?, thumbHash: String?) {
+        if (albumId == 0L) return
+        val color = ThumbHash.parseHexColor(dominantColorHex)
+            ?: thumbHash?.let { ThumbHash.decodeBase64(it) }?.let { ThumbHash.averageArgb(it) }
+            ?: return
+        val palette = AlbumPalette(albumId, color, color, color, hasArt = true)
+        memory[albumId] = palette
+        dao.upsert(palette.toEntity())
+    }
 
     suspend fun paletteFor(songId: Long, albumId: Long): AlbumPalette? {
-        if (albumId <= 0) return null
+        if (albumId == 0L) return null
         memory[albumId]?.let { return it }
         invalidateStale()
         val palette = dao.get(albumId)?.toModel() ?: compute(songId, albumId).also { dao.upsert(it.toEntity()) }
@@ -69,8 +88,15 @@ class ArtworkColorStore @Inject constructor(
 
     private suspend fun compute(songId: Long, albumId: Long): AlbumPalette = withContext(worker) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-        val bitmap = ArtworkDecoder.decode(context, songId, albumId, SAMPLE_PX)
-            ?: return@withContext AlbumPalette(albumId, FALLBACK, FALLBACK, FALLBACK, hasArt = false)
+        val bitmap = ArtworkDecoder.decodeAsync(context, songId, albumId, SAMPLE_PX)
+        if (bitmap == null) {
+            val remoteSeed = RemoteArtworkBridge.dominantOrThumbColor(songId, albumId)
+            return@withContext if (remoteSeed != null) {
+                AlbumPalette(albumId, remoteSeed, remoteSeed, remoteSeed, hasArt = true)
+            } else {
+                AlbumPalette(albumId, FALLBACK, FALLBACK, FALLBACK, hasArt = false)
+            }
+        }
         extract(albumId, bitmap)
     }
 

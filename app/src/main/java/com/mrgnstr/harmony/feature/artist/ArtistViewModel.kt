@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+import java.io.File
+
 internal data class ArtistUiState(
     val name: String,
     val loaded: Boolean = false,
@@ -30,6 +32,7 @@ internal data class ArtistUiState(
     val logoPath: String? = null,
     val playingId: Long? = null,
     val favourite: Boolean = false,
+    val remoteExtra: ArtistExtraInfo? = null,
 )
 
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
@@ -39,10 +42,15 @@ class ArtistViewModel @AssistedInject constructor(
     history: HistoryRepository,
     private val images: ArtistImageStore,
     private val favourites: FavouritesRepository,
+    private val navidrome: NavidromeRepository,
     private val player: PlayerConnection,
     colors: ArtworkColorStore,
 ) : ViewModel() {
     @AssistedFactory interface Factory { fun create(name: String): ArtistViewModel }
+
+    init {
+        viewModelScope.launch { navidrome.enrichArtistInfo(name) }
+    }
 
     private val library = combine(repository.songs, repository.albums, history.playCounts) { songs, albums, counts ->
         val index = ArtistIndex.of(songs)
@@ -66,10 +74,19 @@ class ArtistViewModel @AssistedInject constructor(
         if (customImage != null) colors.accentForImage(customImage)
         else hero?.let { colors.paletteFor(it.artSongId, it.id)?.takeIf { p -> p.hasArt }?.primary }
     }
-    private val art = combine(images.images, images.logos) { photos, logos -> photos[name] to logos[name] }
-    internal val state = combine(library, accent, art, player.state, favourites.artists) { base, accent, art, playback, favourites ->
-        base.copy(accent = accent, imagePath = art.first?.path, imageRatio = art.first?.ratio ?: 1f,
-            logoPath = art.second?.path, playingId = playback.mediaId?.toLongOrNull(), favourite = name in favourites)
+    private val art = combine(images.images, images.logos, navidrome.observeArtistExtra(name)) { photos, logos, extra ->
+        Triple(photos[name], logos[name], extra)
+    }
+    internal val state = combine(library, accent, art, player.state, favourites.artists) { base, accent, (photo, logo, extra), playback, favourites ->
+        base.copy(
+            accent = accent,
+            imagePath = photo?.path,
+            imageRatio = photo?.ratio ?: 1f,
+            logoPath = logo?.path,
+            playingId = playback.mediaId?.toLongOrNull(),
+            favourite = name in favourites,
+            remoteExtra = extra,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArtistUiState(name))
 
     val imageError = MutableStateFlow<String?>(null)
@@ -79,9 +96,34 @@ class ArtistViewModel @AssistedInject constructor(
     fun playNext(song: Song) = player.playNext(listOf(song))
     fun addToQueue(song: Song) = player.playLast(listOf(song))
     fun toggleFavourite() { viewModelScope.launch { favourites.toggleArtist(name) } }
-    fun setImage(uri: String, logo: Boolean = false) { viewModelScope.launch {
-        val saved = if (logo) images.setLogo(name, uri) else images.set(name, uri)
-        if (!saved) imageError.value = "This image could not be read. Try another image."
-    } }
-    fun clearImage(logo: Boolean = false) { viewModelScope.launch { if (logo) images.clearLogo(name) else images.clear(name) } }
+    fun setImage(uri: String, logo: Boolean = false) {
+        viewModelScope.launch {
+            val saved = if (logo) images.setLogo(name, uri) else images.set(name, uri)
+            if (!saved) {
+                imageError.value = "This image could not be read. Try another image."
+            } else if (!logo) {
+                images.images.value[name]?.path?.let { path ->
+                    runCatching { File(path).readBytes() }.getOrNull()?.let { bytes ->
+                        navidrome.uploadCustomArtistImage(name, bytes)
+                    }
+                }
+            }
+        }
+    }
+    fun clearImage(logo: Boolean = false) {
+        viewModelScope.launch {
+            if (logo) images.clearLogo(name)
+            else {
+                images.clear(name)
+                navidrome.deleteCustomArtistImage(name)
+            }
+        }
+    }
+    fun refreshServerMetadata() {
+        val remoteId = state.value.remoteExtra?.remoteId ?: return
+        viewModelScope.launch {
+            navidrome.refreshEntityMetadata("ar", remoteId)
+            navidrome.enrichArtistInfo(name)
+        }
+    }
 }

@@ -26,12 +26,21 @@ class LyricsRepository @Inject constructor(@ApplicationContext private val conte
     // is looked up again once access is granted.
     private val cache = LruCache<Long, Result>(64)
 
+    /** Optional hook wired by [NavidromeRepository] to fetch OpenSubsonic `songLyrics` v2 (`getLyricsBySongId?enhanced=true`). */
+    @Volatile var remoteLyricsFetcher: (suspend (songId: Long) -> Lyrics?)? = null
+
     private class Result(val lyrics: Lyrics?, val withAccess: Boolean)
 
     /** Whether files beside the songs can be read: always before Android 11 (the storage permission covers them). */
     fun hasFileAccess(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
 
     suspend fun lyricsFor(songId: Long): Lyrics? {
+        if (songId < 0L) {
+            cache.get(songId)?.lyrics?.let { return it }
+            val remote = remoteLyricsFetcher?.invoke(songId)
+            if (remote != null) cache.put(songId, Result(remote, true))
+            return remote
+        }
         val access = hasFileAccess()
         cache.get(songId)?.takeIf { it.lyrics != null || it.withAccess || !access }?.let { return it.lyrics }
         val lyrics = withContext(Dispatchers.IO) { load(songId) }

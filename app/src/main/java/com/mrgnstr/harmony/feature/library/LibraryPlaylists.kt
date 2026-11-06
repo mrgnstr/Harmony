@@ -59,8 +59,8 @@ import com.mrgnstr.harmony.core.data.PlaylistRepository
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
-import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
+import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
 import com.mrgnstr.harmony.core.designsystem.components.PlaylistCover
@@ -97,19 +97,31 @@ private sealed interface Editing {
 @Composable
 fun PlaylistsTab(viewModel: LibraryViewModel, onOpenPlaylist: (Long) -> Unit) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val hasNavidrome by viewModel.hasNavidrome.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Editing?>(null) }
+    var buildingSmart by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
 
     val key = viewModel.sorts.collectAsStateWithLifecycle().value.getValue(LibraryTab.Playlists).key
-    // Item 0 is the New Playlist tile and Favourites is pinned first; neither has a letter.
-    TileGrid(playlists.size + 1, { i ->
-        playlists.getOrNull(i - 1)?.takeIf { key == SortKey.Title && !it.isFavourites }?.let { letterOf(it.name) }
+    val extraTiles = if (hasNavidrome) 2 else 1
+    // Item 0 is the New Playlist tile (+ optional Smart Playlist tile) and Favourites is pinned first; none have a letter.
+    TileGrid(playlists.size + extraTiles, { i ->
+        playlists.getOrNull(i - extraTiles)?.takeIf { key == SortKey.Title && !it.isFavourites }?.let { letterOf(it.name) }
     }) { columns ->
         // The first cell: a tile that makes a new playlist.
         item(key = "new", contentType = "new") {
             ArtworkTile("New Playlist", null, { editing = Editing.New }, Modifier.padding(gridCellPadding(0, columns))) { cover ->
                 Box(cover.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                     SymbolIcon(Symbols.Add, null, size = 48.dp, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+        }
+        if (hasNavidrome) {
+            item(key = "new-smart", contentType = "new") {
+                ArtworkTile("Smart Playlist", "Navidrome rules", { buildingSmart = true }, Modifier.padding(gridCellPadding(1 % columns, columns))) { cover ->
+                    Box(cover.background(MaterialTheme.colorScheme.tertiaryContainer), contentAlignment = Alignment.Center) {
+                        SymbolIcon(Symbols.AutoAwesome, null, size = 44.dp, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                    }
                 }
             }
         }
@@ -121,9 +133,19 @@ fun PlaylistsTab(viewModel: LibraryViewModel, onOpenPlaylist: (Long) -> Unit) {
                 onShuffle = { viewModel.playPlaylist(playlist, shuffled = true) },
                 onEdit = { editing = Editing.Edit(playlist) },
                 onDelete = { deleting = playlist },
-                modifier = itemMotion().padding(gridCellPadding((i + 1) % columns, columns)),
+                modifier = itemMotion().padding(gridCellPadding((i + extraTiles) % columns, columns)),
             )
         }
+    }
+
+    if (buildingSmart) {
+        SmartPlaylistBuilderSheet(
+            onDismiss = { buildingSmart = false },
+            onCreate = { name, comment, isPublic, criteria ->
+                buildingSmart = false
+                viewModel.createSmartPlaylist(name, comment, isPublic, criteria)
+            },
+        )
     }
 
     when (val e = editing) {
@@ -160,21 +182,32 @@ private fun PlaylistTile(
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val haptics = LocalHapticFeedback.current
-    Box(modifier) {
-        ArtworkTile(
-            playlist.name, "${playlist.songCount} ${if (playlist.songCount == 1) "song" else "songs"}", onClick,
-            onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menuOpen = true },
-        ) { cover -> PlaylistCover(playlist, cover) }
-        DropdownMenu(menuOpen, { menuOpen = false }) {
-            DropdownMenuItem(text = { Text("Play") }, leadingIcon = { SymbolIcon(Symbols.Play, null) }, onClick = { menuOpen = false; onPlay() })
-            DropdownMenuItem(text = { Text("Shuffle") }, leadingIcon = { SymbolIcon(Symbols.Shuffle, null) }, onClick = { menuOpen = false; onShuffle() })
-            if (!playlist.isFavourites) {
-                DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { SymbolIcon(Symbols.Edit, null) }, onClick = { menuOpen = false; onEdit() })
-                DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { SymbolIcon(Symbols.Delete, null) }, onClick = { menuOpen = false; onDelete() })
-            }
-        }
+    var menuInitialized by remember { mutableStateOf(false) }
+    val countText = "${playlist.songCount} ${if (playlist.songCount == 1) "song" else "songs"}"
+    val subtitle = when {
+        playlist.isSmart -> "Smart · $countText"
+        playlist.isRemote -> "Navidrome · $countText"
+        else -> countText
     }
+    ArtworkTile(
+        title = playlist.name,
+        subtitle = subtitle,
+        onClick = onClick,
+        modifier = modifier,
+        onLongClick = { menuInitialized = true; menuOpen = true },
+        menu = {
+            if (menuInitialized) {
+                CenteredDropdownMenu(menuOpen, { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Play") }, leadingIcon = { SymbolIcon(Symbols.Play, null) }, onClick = { menuOpen = false; onPlay() })
+                    DropdownMenuItem(text = { Text("Shuffle") }, leadingIcon = { SymbolIcon(Symbols.Shuffle, null) }, onClick = { menuOpen = false; onShuffle() })
+                    if (!playlist.isFavourites) {
+                        DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { SymbolIcon(Symbols.Edit, null) }, onClick = { menuOpen = false; onEdit() })
+                        DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { SymbolIcon(Symbols.Delete, null) }, onClick = { menuOpen = false; onDelete() })
+                    }
+                }
+            }
+        },
+    ) { cover -> PlaylistCover(playlist, cover) }
 }
 
 /** New playlist / edit playlist: a cover to pick (tap it) and a name. [onSave] gets the picked image, if any, and whether to drop the custom cover. */
@@ -330,8 +363,6 @@ fun PlaylistRoute(
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
-    val albums by viewModel.albums.collectAsStateWithLifecycle()
 
     TopBarScaffold(
         title = playlist?.name ?: if (playlistId == FAVOURITES_PLAYLIST_ID) "Favourite Songs" else "Playlist",
@@ -375,63 +406,14 @@ fun PlaylistRoute(
                 }
                 listItemsIndexed(state.entries, key = { _, entry -> entry.entryId }, contentType = { _, _ -> "song" }) { index, entry ->
                     val song = entry.song
-                    val fav = song.id in state.favouriteSongIds
-                    var rowMenu by remember { mutableStateOf(false) }
-                    Box(itemMotion()) {
-                        SongRow(
-                            song = song,
-                            onClick = { viewModel.play(index) },
-                            subtitle = listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · "),
-                            playing = song.id == state.playingId,
-                            onMore = { rowMenu = true },
-                        )
-                        Box(Modifier.align(Alignment.CenterEnd)) {
-                            DropdownMenu(rowMenu, { rowMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Play next") },
-                                    leadingIcon = { SymbolIcon(Symbols.PlayNext, null) },
-                                    onClick = { rowMenu = false; viewModel.playNext(song) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Add to queue") },
-                                    leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) },
-                                    onClick = { rowMenu = false; viewModel.addToQueue(song) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Add to playlist") },
-                                    leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) },
-                                    onClick = { rowMenu = false; playlistFor = listOf(song) },
-                                )
-                                if (playlistId != FAVOURITES_PLAYLIST_ID) {
-                                    DropdownMenuItem(
-                                        text = { Text("Remove from playlist") },
-                                        leadingIcon = { SymbolIcon(Symbols.Delete, null) },
-                                        onClick = { rowMenu = false; viewModel.removeEntry(entry.entryId) },
-                                    )
-                                }
-                                DropdownMenuItem(
-                                    text = { Text(if (fav) "Remove from favourites" else "Favourite") },
-                                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (fav) 1f else 0f) },
-                                    onClick = { rowMenu = false; viewModel.toggleFavourite(song) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Go to album") },
-                                    leadingIcon = { SymbolIcon(Symbols.Album, null) },
-                                    onClick = {
-                                        rowMenu = false
-                                        val album = albums.firstOrNull { it.id == song.albumId && it.title == song.album }
-                                            ?: Album(song.albumId, song.album, song.albumArtist, song.id, 1, song.dateAddedSec, song.durationMs, song.year)
-                                        onOpenAlbum(album)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Go to artist") },
-                                    leadingIcon = { SymbolIcon(Symbols.Artist, null) },
-                                    onClick = { rowMenu = false; onOpenArtist(song.artist) },
-                                )
-                            }
-                        }
-                    }
+                    SongRow(
+                        song = song,
+                        onClick = { viewModel.play(index) },
+                        subtitle = listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · "),
+                        playing = song.id == state.playingId,
+                        onRemoveFromPlaylist = if (playlistId != FAVOURITES_PLAYLIST_ID) ({ viewModel.removeEntry(entry.entryId) }) else null,
+                        modifier = itemMotion(),
+                    )
                 }
             }
         }
@@ -450,15 +432,6 @@ fun PlaylistRoute(
             text = { Text("The songs stay in your library.") },
             confirmButton = { TextButton(onClick = { deleting = false; viewModel.delete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
-        )
-    }
-    playlistFor?.let { songs ->
-        val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-        AddToPlaylistSheet(
-            playlists,
-            onPick = { viewModel.addToPlaylist(it.id, songs); playlistFor = null },
-            onCreate = { viewModel.addToNewPlaylist(it, songs); playlistFor = null },
-            onDismiss = { playlistFor = null },
         )
     }
 }

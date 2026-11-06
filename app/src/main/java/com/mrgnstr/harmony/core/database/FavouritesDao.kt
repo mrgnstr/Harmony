@@ -32,8 +32,23 @@ abstract class FavouritesDao {
 
     /** Favourites the song, or removes it when it already is one. */
     @Transaction
-    open suspend fun toggleSong(songId: Long, nowMs: Long) {
-        if (songCount(songId) > 0) deleteSong(songId) else insertSong(FavouriteSongEntity(songId, nowMs))
+    open suspend fun toggleSong(songId: Long, nowMs: Long): Boolean {
+        return if (songCount(songId) > 0) {
+            deleteSong(songId)
+            false
+        } else {
+            insertSong(FavouriteSongEntity(songId, nowMs))
+            true
+        }
+    }
+
+    @Transaction
+    open suspend fun setSongFavourite(songId: Long, starred: Boolean, nowMs: Long) {
+        if (starred) {
+            if (songCount(songId) == 0) insertSong(FavouriteSongEntity(songId, nowMs))
+        } else {
+            deleteSong(songId)
+        }
     }
 
     @Query("SELECT COUNT(*) FROM favourite_albums WHERE albumId = :albumId AND title = :title")
@@ -46,8 +61,23 @@ abstract class FavouritesDao {
     protected abstract suspend fun deleteAlbum(albumId: Long, title: String)
 
     @Transaction
-    open suspend fun toggleAlbum(albumId: Long, title: String, nowMs: Long) {
-        if (albumCount(albumId, title) > 0) deleteAlbum(albumId, title) else insertAlbum(FavouriteAlbumEntity(albumId, title, nowMs))
+    open suspend fun toggleAlbum(albumId: Long, title: String, nowMs: Long): Boolean {
+        return if (albumCount(albumId, title) > 0) {
+            deleteAlbum(albumId, title)
+            false
+        } else {
+            insertAlbum(FavouriteAlbumEntity(albumId, title, nowMs))
+            true
+        }
+    }
+
+    @Transaction
+    open suspend fun setAlbumFavourite(albumId: Long, title: String, starred: Boolean, nowMs: Long) {
+        if (starred) {
+            if (albumCount(albumId, title) == 0) insertAlbum(FavouriteAlbumEntity(albumId, title, nowMs))
+        } else {
+            deleteAlbum(albumId, title)
+        }
     }
 
     @Query("SELECT name FROM favourite_artists ORDER BY addedAtMs DESC, name ASC")
@@ -63,7 +93,22 @@ abstract class FavouritesDao {
     protected abstract suspend fun deleteArtist(name: String)
 
     @Transaction
-    open suspend fun toggleArtist(name: String, nowMs: Long) {
-        if (artistCount(name) > 0) deleteArtist(name) else insertArtist(FavouriteArtistEntity(name, nowMs))
+    open suspend fun toggleArtist(name: String, nowMs: Long): Boolean {
+        return if (artistCount(name) > 0) {
+            deleteArtist(name)
+            false
+        } else {
+            insertArtist(FavouriteArtistEntity(name, nowMs))
+            true
+        }
+    }
+
+    @Transaction
+    open suspend fun setArtistFavourite(name: String, starred: Boolean, nowMs: Long) {
+        if (starred) {
+            if (artistCount(name) == 0) insertArtist(FavouriteArtistEntity(name, nowMs))
+        } else {
+            deleteArtist(name)
+        }
     }
 }

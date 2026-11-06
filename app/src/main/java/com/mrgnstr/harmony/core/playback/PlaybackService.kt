@@ -18,14 +18,19 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import androidx.media3.common.Player
 import androidx.media3.session.MediaSessionService
 import com.mrgnstr.harmony.core.common.ApplicationScope
+import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.database.HistoryDao
 import com.mrgnstr.harmony.core.database.QueueDao
+import com.mrgnstr.harmony.core.datastore.SettingsStore
+import com.mrgnstr.harmony.core.model.ReplayGainMode
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +45,8 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var queueDao: QueueDao
     @Inject lateinit var historyDao: HistoryDao
     @Inject lateinit var queueRestorer: QueueRestorer
+    @Inject lateinit var navidrome: NavidromeRepository
+    @Inject lateinit var settings: SettingsStore
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private var session: MediaSession? = null
@@ -48,6 +55,8 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     /** The saved queue has been (or is being) loaded into the player, by the launch restore or by [onPlaybackResumption]. */
     private var restoreHandled = false
+    private var rgMode: ReplayGainMode = ReplayGainMode.Smart
+    private var rgPreampDb: Float = 0f
 
     override fun onCreate() {
         super.onCreate()
@@ -70,11 +79,47 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).setSessionActivity(open).build()
-        history = HistoryRecorder(player, historyDao, appScope)
+        history = HistoryRecorder(player, historyDao, appScope) { songId, playedAtMs ->
+            navidrome.reportScrobble(songId, playedAtMs, submission = true)
+        }
         val persister = QueuePersister(player, queueStore, queueDao, appScope).also { persister = it }
+
+        // ReplayGain and live playback reporting to Navidrome
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                applyReplayGain(player, mediaItem)
+                val songId = mediaItem?.mediaId?.toLongOrNull() ?: return
+                if (player.isPlaying && songId < 0L) {
+                    appScope.launch {
+                        navidrome.reportScrobble(songId, System.currentTimeMillis(), submission = false, positionMs = 0L, state = "playing")
+                    }
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                val item = player.currentMediaItem ?: return
+                val songId = item.mediaId.toLongOrNull() ?: return
+                if (songId < 0L) {
+                    val pos = player.currentPosition.coerceAtLeast(0L)
+                    val st = if (isPlaying) "playing" else "paused"
+                    appScope.launch {
+                        navidrome.reportScrobble(songId, System.currentTimeMillis(), submission = false, positionMs = pos, state = st)
+                    }
+                }
+            }
+        })
+        scope.launch {
+            combine(settings.replayGainMode, settings.replayGainPreampDb) { mode, preamp -> mode to preamp }
+                .collect { (mode, preamp) ->
+                    rgMode = mode
+                    rgPreampDb = preamp
+                    applyReplayGain(player, player.currentMediaItem)
+                }
+        }
+
         // Back to where playback stopped, paused. Saving only starts afterwards, so the empty player cannot overwrite the queue.
         scope.launch {
-            val saved = if (hasAudioPermission()) runCatching { queueRestorer.load() }.getOrNull() else null
+            val saved = if (hasAudioPermission() || navidrome.activeAccount.value != null) runCatching { queueRestorer.load() }.getOrNull() else null
             // The user may have started something before the read finished (or resumption got there first): that wins.
             if (saved != null && !restoreHandled && player.mediaItemCount == 0) {
                 restoreHandled = true
@@ -85,6 +130,17 @@ class PlaybackService : MediaSessionService() {
             }
             persister.arm()
         }
+    }
+
+    private fun applyReplayGain(player: ExoPlayer, item: androidx.media3.common.MediaItem?) {
+        val rg = item?.replayGainInfo()
+        if (rg == null || rgMode == ReplayGainMode.Off) {
+            player.volume = 1f
+            return
+        }
+        val albumTitle = item.mediaMetadata.albumTitle?.toString()
+        val isAlbumSource = !albumTitle.isNullOrBlank() && queueStore.source == albumTitle
+        player.volume = rg.computeGainFactor(rgMode, isAlbumSource, rgPreampDb, preventClipping = true).coerceIn(0.05f, 1.0f)
     }
 
     private fun applySaved(saved: SavedQueue) {

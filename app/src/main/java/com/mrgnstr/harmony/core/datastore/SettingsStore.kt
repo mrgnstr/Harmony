@@ -2,6 +2,7 @@ package com.mrgnstr.harmony.core.datastore
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -9,7 +10,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.LibrarySort
+import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.ReplayGainMode
+import com.mrgnstr.harmony.core.model.StreamQuality
 import com.mrgnstr.harmony.core.model.ThemeMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -79,5 +83,67 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
             val folders = prefs[excludedFoldersKey] ?: emptySet()
             prefs[excludedFoldersKey] = if (excluded) folders + path else folders - path
         }
+    }
+
+    // --- Navidrome / Streaming / ReplayGain Settings ---
+
+    private val sourceModeKey = stringPreferencesKey("library_source_mode")
+    private val wifiQualityKey = stringPreferencesKey("wifi_stream_quality")
+    private val mobileQualityKey = stringPreferencesKey("mobile_stream_quality")
+    private val replayGainModeKey = stringPreferencesKey("replay_gain_mode")
+    private val replayGainPreampKey = floatPreferencesKey("replay_gain_preamp_db")
+    private val syncPlayQueueKey = booleanPreferencesKey("sync_play_queue")
+    private val scrobbleKey = booleanPreferencesKey("scrobble_to_server")
+
+    val librarySourceMode: Flow<LibrarySourceMode> = context.settingsDataStore.data.map { prefs ->
+        prefs[sourceModeKey]?.let { s -> LibrarySourceMode.entries.firstOrNull { it.name == s } } ?: LibrarySourceMode.All
+    }
+
+    suspend fun setLibrarySourceMode(mode: LibrarySourceMode) {
+        context.settingsDataStore.edit { it[sourceModeKey] = mode.name }
+    }
+
+    val wifiStreamQuality: Flow<StreamQuality> = context.settingsDataStore.data.map { prefs ->
+        prefs[wifiQualityKey]?.let { s -> StreamQuality.entries.firstOrNull { it.name == s } } ?: StreamQuality.Lossless
+    }
+
+    suspend fun setWifiStreamQuality(quality: StreamQuality) {
+        context.settingsDataStore.edit { it[wifiQualityKey] = quality.name }
+    }
+
+    val mobileStreamQuality: Flow<StreamQuality> = context.settingsDataStore.data.map { prefs ->
+        prefs[mobileQualityKey]?.let { s -> StreamQuality.entries.firstOrNull { it.name == s } } ?: StreamQuality.Balanced
+    }
+
+    suspend fun setMobileStreamQuality(quality: StreamQuality) {
+        context.settingsDataStore.edit { it[mobileQualityKey] = quality.name }
+    }
+
+    val replayGainMode: Flow<ReplayGainMode> = context.settingsDataStore.data.map { prefs ->
+        prefs[replayGainModeKey]?.let { s -> ReplayGainMode.entries.firstOrNull { it.name == s } } ?: ReplayGainMode.Smart
+    }
+
+    suspend fun setReplayGainMode(mode: ReplayGainMode) {
+        context.settingsDataStore.edit { it[replayGainModeKey] = mode.name }
+    }
+
+    val replayGainPreampDb: Flow<Float> = context.settingsDataStore.data.map { prefs ->
+        (prefs[replayGainPreampKey] ?: 0f).coerceIn(-12f, 12f)
+    }
+
+    suspend fun setReplayGainPreampDb(db: Float) {
+        context.settingsDataStore.edit { it[replayGainPreampKey] = db.coerceIn(-12f, 12f) }
+    }
+
+    val syncPlayQueue: Flow<Boolean> = context.settingsDataStore.data.map { it[syncPlayQueueKey] ?: true }
+
+    suspend fun setSyncPlayQueue(enabled: Boolean) {
+        context.settingsDataStore.edit { it[syncPlayQueueKey] = enabled }
+    }
+
+    val scrobbleToServer: Flow<Boolean> = context.settingsDataStore.data.map { it[scrobbleKey] ?: true }
+
+    suspend fun setScrobbleToServer(enabled: Boolean) {
+        context.settingsDataStore.edit { it[scrobbleKey] = enabled }
     }
 }

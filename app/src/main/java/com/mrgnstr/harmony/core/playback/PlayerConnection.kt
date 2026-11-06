@@ -10,6 +10,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.mrgnstr.harmony.core.model.RadioStation
 import com.mrgnstr.harmony.core.model.Song
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -36,6 +37,9 @@ data class PlaybackSnapshot(
     val hasMedia: Boolean = false,
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
+    val codec: String? = null,
+    val bitRateKbps: Int = 0,
+    val isRemote: Boolean = false,
 ) {
     val songId: Long? get() = mediaId?.toLongOrNull()
 }
@@ -114,16 +118,20 @@ class PlayerConnection @Inject constructor(
 
     private fun publish(player: Player) {
         val item = player.currentMediaItem
+        val extras = item?.mediaMetadata?.extras
         _state.value = PlaybackSnapshot(
             mediaId = item?.mediaId,
             title = item?.mediaMetadata?.title?.toString().orEmpty(),
             artist = item?.mediaMetadata?.artist?.toString().orEmpty(),
-            albumId = item?.mediaMetadata?.extras?.getLong(EXTRA_ALBUM_ID) ?: 0L,
+            albumId = extras?.getLong(EXTRA_ALBUM_ID) ?: 0L,
             albumTitle = item?.mediaMetadata?.albumTitle?.toString().orEmpty(),
             isPlaying = player.isPlaying,
             hasMedia = player.mediaItemCount > 0,
             hasNext = player.hasNextMediaItem(),
             hasPrevious = player.hasPreviousMediaItem(),
+            codec = extras?.getString(EXTRA_CODEC),
+            bitRateKbps = extras?.getInt(EXTRA_BITRATE, 0) ?: 0,
+            isRemote = (extras?.getLong(EXTRA_SERVER_ID, 0L) ?: 0L) > 0L || (item?.mediaId?.toLongOrNull() ?: 0L) < 0L,
         )
     }
 
@@ -175,6 +183,18 @@ class PlayerConnection @Inject constructor(
         store.source = source
         withController {
             it.setMediaItems(items, startIndex.coerceIn(items.indices), 0L)
+            it.prepare()
+            it.play()
+        }
+    }
+
+    /** Starts streaming a live Internet Radio station. */
+    fun playRadio(station: RadioStation) {
+        val item = station.toMediaItem()
+        store.unshuffled = null
+        store.source = station.name
+        withController {
+            it.setMediaItems(listOf(item), 0, 0L)
             it.prepare()
             it.play()
         }

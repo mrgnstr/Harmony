@@ -18,8 +18,21 @@ data class Playlist(
     val durationMs: Long,
     val updatedAtMs: Long,
     val art: List<ArtRef>,
+    val serverId: Long = 0L,
+    val remoteId: String? = null,
+    val comment: String? = null,
+    val isPublic: Boolean = false,
+    val owner: String? = null,
+    val isSmart: Boolean = false,
+    val readonly: Boolean = false,
+    val validUntilMs: Long? = null,
+    val rulesJson: String? = null,
+    val coverArtId: String? = null,
+    val userRating: Int = 0,
+    val starred: Boolean = false,
 ) {
     val isFavourites: Boolean get() = id == FAVOURITES_PLAYLIST_ID
+    val isRemote: Boolean get() = serverId > 0L || !remoteId.isNullOrEmpty()
 }
 
 /** A song at one position of a playlist; [entryId] tells duplicates apart (the same song can be added twice). */

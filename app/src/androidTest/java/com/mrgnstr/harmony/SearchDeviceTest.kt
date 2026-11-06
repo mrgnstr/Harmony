@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mrgnstr.harmony.core.database.HarmonyDatabase
 import com.mrgnstr.harmony.core.database.MIGRATION_9_10
 import com.mrgnstr.harmony.core.database.MIGRATION_10_11
+import com.mrgnstr.harmony.core.database.MIGRATION_11_12
 import com.mrgnstr.harmony.core.database.RecentSearchEntity
 import com.mrgnstr.harmony.core.database.SongEntity
 import com.mrgnstr.harmony.core.model.SearchQuery
@@ -90,7 +91,7 @@ class SearchDeviceTest {
                 old.execSQL("INSERT INTO favourite_artists VALUES ('Mili', 100)")
                 old.version = 9
             }
-            val upgraded = Room.databaseBuilder(context, HarmonyDatabase::class.java, name).addMigrations(MIGRATION_9_10, MIGRATION_10_11).build()
+            val upgraded = Room.databaseBuilder(context, HarmonyDatabase::class.java, name).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12).build()
             try {
                 assertEquals(listOf(1L), upgraded.searchDao().songs(requireNotNull(SearchQuery.match("comp"))).first().map { it.id })
                 assertEquals(listOf("Mili"), upgraded.favouritesDao().observeArtistNames().first())

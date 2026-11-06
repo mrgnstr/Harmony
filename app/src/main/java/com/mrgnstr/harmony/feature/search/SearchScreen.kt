@@ -13,6 +13,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,8 +68,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,12 +91,16 @@ import com.mrgnstr.harmony.core.database.AlbumKey
 import com.mrgnstr.harmony.core.database.RecentSearchEntity
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalOpenAlbum
+import com.mrgnstr.harmony.core.designsystem.LocalOpenArtist
 import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
-import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
+import com.mrgnstr.harmony.core.designsystem.components.AlbumContextMenu
+import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
+import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.components.GenreCardTile
 import com.mrgnstr.harmony.core.designsystem.components.LocalCoverShare
@@ -100,6 +108,7 @@ import com.mrgnstr.harmony.core.designsystem.components.MediaRow
 import com.mrgnstr.harmony.core.designsystem.components.PlaylistCover
 import com.mrgnstr.harmony.core.designsystem.components.RowCoverShape
 import com.mrgnstr.harmony.core.designsystem.components.SectionHeading
+import com.mrgnstr.harmony.core.designsystem.components.SongContextMenu
 import com.mrgnstr.harmony.core.designsystem.components.SongRow
 import com.mrgnstr.harmony.core.designsystem.components.TopBarScaffold
 import com.mrgnstr.harmony.core.designsystem.components.albumCoverKey
@@ -333,14 +342,9 @@ fun SearchRoute(
     val recents by viewModel.recents.collectAsStateWithLifecycle()
     val genres by viewModel.genres.collectAsStateWithLifecycle()
     val playingId by viewModel.playingId.collectAsStateWithLifecycle()
-    val favSongs by viewModel.favouriteSongs.collectAsStateWithLifecycle()
-    val favAlbums by viewModel.favouriteAlbums.collectAsStateWithLifecycle()
-    val favArtists by viewModel.favouriteArtists.collectAsStateWithLifecycle()
-    val allAlbums by viewModel.albums.collectAsStateWithLifecycle()
     val libraryLoading by viewModel.libraryLoading.collectAsStateWithLifecycle()
 
     var scope by rememberSaveable { mutableStateOf(SearchScope.All) }
-    var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
     val focus = LocalFocusManager.current
     val results = state.results
     val searching = state.loading || results.query != query
@@ -350,6 +354,10 @@ fun SearchRoute(
         focus.clearFocus()
     }
 
+    CompositionLocalProvider(
+        LocalOpenAlbum provides { album -> openResult(); onOpenAlbum(album) },
+        LocalOpenArtist provides { artist -> openResult(); onOpenArtist(artist) },
+    ) {
     TopBarScaffold(
         title = "Search",
         modifier = modifier.imePadding(),
@@ -539,22 +547,14 @@ fun SearchRoute(
                                     }
                                     val songs = if (scope == SearchScope.All) results.songs.take(PreviewLimit) else results.songs
                                     itemsIndexed(songs, key = { _, s -> "song:${s.id}" }, contentType = { _, _ -> "song" }) { index, song ->
-                                        SearchSongRow(
+                                        val subtitle = remember(song.artist, song.album) {
+                                            listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
+                                        }
+                                        SongRow(
                                             song = song,
+                                            onClick = { focus.clearFocus(); viewModel.playSong(index) },
+                                            subtitle = subtitle,
                                             playing = song.id == playingId,
-                                            favourite = song.id in favSongs,
-                                            onPlay = { focus.clearFocus(); viewModel.playSong(index) },
-                                            onPlayNext = { viewModel.playNextSong(song) },
-                                            onAddToQueue = { viewModel.addToQueueSong(song) },
-                                            onAddToPlaylist = { playlistFor = listOf(song) },
-                                            onToggleFavourite = { viewModel.toggleFavouriteSong(song) },
-                                            onOpenAlbum = {
-                                                openResult()
-                                                val album = allAlbums.firstOrNull { it.id == song.albumId && it.title == song.album }
-                                                    ?: Album(song.albumId, song.album, song.albumArtist, song.id, 1, song.dateAddedSec, song.durationMs, song.year)
-                                                onOpenAlbum(album)
-                                            },
-                                            onOpenArtist = { openResult(); onOpenArtist(song.artist) },
                                             modifier = itemMotion(),
                                         )
                                     }
@@ -570,15 +570,7 @@ fun SearchRoute(
                                     items(albums, key = { "album:${it.id}:${it.title}" }, contentType = { "album" }) { album ->
                                         SearchAlbumRow(
                                             album = album,
-                                            favourite = AlbumKey(album.id, album.title) in favAlbums,
                                             onClick = { openResult(); onOpenAlbum(album) },
-                                            onPlay = { viewModel.playAlbum(album, shuffled = false) },
-                                            onShuffle = { viewModel.playAlbum(album, shuffled = true) },
-                                            onPlayNext = { viewModel.playNextAlbum(album) },
-                                            onAddToQueue = { viewModel.addToQueueAlbum(album) },
-                                            onAddToPlaylist = { viewModel.addAlbumToPlaylist(album) { playlistFor = it } },
-                                            onToggleFavourite = { viewModel.toggleFavouriteAlbum(album) },
-                                            onOpenArtist = { openResult(); onOpenArtist(album.artist) },
                                             modifier = itemMotion(),
                                         )
                                     }
@@ -594,10 +586,7 @@ fun SearchRoute(
                                     items(artists, key = { "artist:${it.name}" }, contentType = { "artist" }) { artist ->
                                         SearchArtistRow(
                                             artist = artist,
-                                            favourite = artist.name in favArtists,
                                             onClick = { openResult(); onOpenArtist(artist.name) },
-                                            onPlay = { viewModel.playArtist(artist) },
-                                            onToggleFavourite = { viewModel.toggleFavouriteArtist(artist.name) },
                                             modifier = itemMotion(),
                                         )
                                     }
@@ -627,15 +616,6 @@ fun SearchRoute(
             }
         }
     }
-
-    playlistFor?.let { songs ->
-        val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-        AddToPlaylistSheet(
-            playlists,
-            onPick = { viewModel.addToPlaylist(it.id, songs); playlistFor = null },
-            onCreate = { viewModel.addToNewPlaylist(it, songs); playlistFor = null },
-            onDismiss = { playlistFor = null },
-        )
     }
 }
 
@@ -801,6 +781,9 @@ private fun TopResultCard(
     val share = LocalCoverShare.current
     val owner = remember { Any() }
     val interaction = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
+    var menuOpen by remember { mutableStateOf(false) }
+    var menuInitialized by remember { mutableStateOf(false) }
 
     val label: String
     val title: String
@@ -809,6 +792,7 @@ private fun TopResultCard(
     val onCardClick: () -> Unit
     val onPlayClick: () -> Unit
     val artwork: @Composable () -> Unit
+    val menuContent: @Composable () -> Unit
 
     when (topCategory) {
         SearchCategory.Artists -> {
@@ -825,6 +809,11 @@ private fun TopResultCard(
                     AsyncImage(File(image), null, Modifier.size(80.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                 } else {
                     ArtworkImage(artist.artSongId, artist.artAlbumId, Modifier.size(80.dp).clip(CircleShape))
+                }
+            }
+            menuContent = {
+                if (menuInitialized) {
+                    ArtistContextMenu(artistName = artist.name, expanded = menuOpen, onDismiss = { menuOpen = false })
                 }
             }
         }
@@ -844,6 +833,11 @@ private fun TopResultCard(
                     Modifier.size(80.dp).clip(RoundedCornerShape(16.dp)).sharedCover(coverKey, owner),
                 )
             }
+            menuContent = {
+                if (menuInitialized) {
+                    AlbumContextMenu(album = album, expanded = menuOpen, onDismiss = { menuOpen = false })
+                }
+            }
         }
         SearchCategory.Songs -> {
             val song = results.songs.firstOrNull() ?: return
@@ -855,6 +849,11 @@ private fun TopResultCard(
             onPlayClick = onPlaySong
             artwork = {
                 ArtworkImage(song.id, song.albumId, Modifier.size(80.dp).clip(RoundedCornerShape(16.dp)))
+            }
+            menuContent = {
+                if (menuInitialized) {
+                    SongContextMenu(song = song, expanded = menuOpen, onDismiss = { menuOpen = false })
+                }
             }
         }
         SearchCategory.Playlists -> {
@@ -868,238 +867,157 @@ private fun TopResultCard(
             artwork = {
                 PlaylistCover(playlist, Modifier.size(80.dp).clip(RoundedCornerShape(16.dp)))
             }
+            menuContent = {
+                if (menuInitialized) {
+                    CenteredDropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Play") },
+                            leadingIcon = { SymbolIcon(Symbols.Play, null) },
+                            onClick = { menuOpen = false; onPlayPlaylist(playlist) },
+                        )
+                    }
+                }
+            }
         }
     }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .pressResponse(interaction, pressedScale = 0.97f),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Row(
-            Modifier.clickable(interaction, indication = null, onClick = onCardClick).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pressResponse(interaction, pressedScale = 0.97f),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
         ) {
-            artwork()
-            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMediumEmphasized,
-                    color = if (highlightTitle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            FilledIconButton(
-                onClick = onPlayClick,
-                shapes = IconButtonDefaults.shapes(),
-                modifier = Modifier.size(48.dp),
+            Row(
+                Modifier
+                    .combinedClickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuInitialized = true
+                            menuOpen = true
+                        },
+                        onClick = onCardClick,
+                    )
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                SymbolIcon(Symbols.Play, "Play $title", fill = 1f)
+                artwork()
+                Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMediumEmphasized,
+                        color = if (highlightTitle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                FilledIconButton(
+                    onClick = onPlayClick,
+                    shapes = IconButtonDefaults.shapes(),
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    SymbolIcon(Symbols.Play, "Play $title", fill = 1f)
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun SearchSongRow(
-    song: Song,
-    playing: Boolean,
-    favourite: Boolean,
-    onPlay: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onToggleFavourite: () -> Unit,
-    onOpenAlbum: () -> Unit,
-    onOpenArtist: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val subtitle = remember(song.artist, song.album) {
-        listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
-    }
-    Box(modifier) {
-        SongRow(
-            song = song,
-            onClick = onPlay,
-            subtitle = subtitle,
-            playing = playing,
-            onMore = { menuOpen = true },
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play next") },
-                    leadingIcon = { SymbolIcon(Symbols.PlayNext, null) },
-                    onClick = { menuOpen = false; onPlayNext() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to queue") },
-                    leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) },
-                    onClick = { menuOpen = false; onAddToQueue() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) },
-                    onClick = { menuOpen = false; onAddToPlaylist() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (favourite) "Remove from favourites" else "Favourite") },
-                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
-                    onClick = { menuOpen = false; onToggleFavourite() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Go to album") },
-                    leadingIcon = { SymbolIcon(Symbols.Album, null) },
-                    onClick = { menuOpen = false; onOpenAlbum() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Go to artist") },
-                    leadingIcon = { SymbolIcon(Symbols.Artist, null) },
-                    onClick = { menuOpen = false; onOpenArtist() },
-                )
-            }
-        }
+        menuContent()
     }
 }
 
 @Composable
 private fun SearchAlbumRow(
     album: Album,
-    favourite: Boolean,
     onClick: () -> Unit,
-    onPlay: () -> Unit,
-    onShuffle: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onToggleFavourite: () -> Unit,
-    onOpenArtist: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var menuInitialized by remember { mutableStateOf(false) }
+    val openMenu = { menuInitialized = true; menuOpen = true }
     val share = LocalCoverShare.current
     val owner = remember { Any() }
     val coverKey = albumCoverKey(album.id, album.title)
     val subtitle = remember(album.artist, album.year) {
         listOfNotNull(album.artist.takeIf { it.isNotBlank() }, album.year.takeIf { it > 0 }?.toString()).joinToString(" · ")
     }
-    Box(modifier) {
-        MediaRow(
-            title = album.title,
-            subtitle = subtitle,
-            onClick = { share?.claim(coverKey, owner); onClick() },
-            leading = {
-                ArtworkImage(
-                    album.artSongId,
-                    album.id,
-                    Modifier.size(56.dp).clip(RowCoverShape).sharedCover(coverKey, owner),
-                )
-            },
-            trailing = {
-                IconButton(onClick = { menuOpen = true }) {
-                    SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play") },
-                    leadingIcon = { SymbolIcon(Symbols.Play, null) },
-                    onClick = { menuOpen = false; onPlay() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Shuffle") },
-                    leadingIcon = { SymbolIcon(Symbols.Shuffle, null) },
-                    onClick = { menuOpen = false; onShuffle() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Play next") },
-                    leadingIcon = { SymbolIcon(Symbols.PlayNext, null) },
-                    onClick = { menuOpen = false; onPlayNext() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to queue") },
-                    leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) },
-                    onClick = { menuOpen = false; onAddToQueue() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    leadingIcon = { SymbolIcon(Symbols.PlaylistAdd, null) },
-                    onClick = { menuOpen = false; onAddToPlaylist() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (favourite) "Remove from favourites" else "Favourite") },
-                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
-                    onClick = { menuOpen = false; onToggleFavourite() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Go to artist") },
-                    leadingIcon = { SymbolIcon(Symbols.Artist, null) },
-                    onClick = { menuOpen = false; onOpenArtist() },
+    MediaRow(
+        title = album.title,
+        subtitle = subtitle,
+        onClick = { share?.claim(coverKey, owner); onClick() },
+        modifier = modifier,
+        onLongClick = openMenu,
+        leading = {
+            ArtworkImage(
+                album.artSongId,
+                album.id,
+                Modifier.size(56.dp).clip(RowCoverShape).sharedCover(coverKey, owner),
+            )
+        },
+        trailing = {
+            IconButton(onClick = openMenu) {
+                SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        menu = {
+            if (menuInitialized) {
+                AlbumContextMenu(
+                    album = album,
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
                 )
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
 private fun SearchArtistRow(
     artist: Artist,
-    favourite: Boolean,
     onClick: () -> Unit,
-    onPlay: () -> Unit,
-    onToggleFavourite: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Box(modifier) {
-        MediaRow(
-            title = artist.name,
-            subtitle = "${artist.songCount} ${if (artist.songCount == 1) "song" else "songs"}",
-            onClick = onClick,
-            leading = {
-                val image = artist.imagePath
-                if (image != null) {
-                    AsyncImage(File(image), null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                } else {
-                    ArtworkImage(artist.artSongId, artist.artAlbumId, Modifier.size(56.dp).clip(CircleShape))
-                }
-            },
-            trailing = {
-                IconButton(onClick = { menuOpen = true }) {
-                    SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play") },
-                    leadingIcon = { SymbolIcon(Symbols.Play, null) },
-                    onClick = { menuOpen = false; onPlay() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (favourite) "Remove from favourites" else "Favourite") },
-                    leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
-                    onClick = { menuOpen = false; onToggleFavourite() },
+    var menuInitialized by remember { mutableStateOf(false) }
+    val openMenu = { menuInitialized = true; menuOpen = true }
+    MediaRow(
+        title = artist.name,
+        subtitle = "${artist.songCount} ${if (artist.songCount == 1) "song" else "songs"}",
+        onClick = onClick,
+        modifier = modifier,
+        onLongClick = openMenu,
+        leading = {
+            val image = artist.imagePath
+            if (image != null) {
+                AsyncImage(File(image), null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+            } else {
+                ArtworkImage(artist.artSongId, artist.artAlbumId, Modifier.size(56.dp).clip(CircleShape))
+            }
+        },
+        trailing = {
+            IconButton(onClick = openMenu) {
+                SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        menu = {
+            if (menuInitialized) {
+                ArtistContextMenu(
+                    artistName = artist.name,
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
                 )
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -1111,33 +1029,37 @@ private fun SearchPlaylistRow(
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Box(modifier) {
-        MediaRow(
-            title = playlist.name,
-            subtitle = "${playlist.songCount} ${if (playlist.songCount == 1) "song" else "songs"}",
-            onClick = onClick,
-            leading = {
-                PlaylistCover(playlist, Modifier.size(56.dp).clip(RowCoverShape))
-            },
-            trailing = {
-                IconButton(onClick = { menuOpen = true }) {
-                    SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-        )
-        Box(Modifier.align(Alignment.CenterEnd)) {
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play") },
-                    leadingIcon = { SymbolIcon(Symbols.Play, null) },
-                    onClick = { menuOpen = false; onPlay() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Shuffle") },
-                    leadingIcon = { SymbolIcon(Symbols.Shuffle, null) },
-                    onClick = { menuOpen = false; onShuffle() },
-                )
+    var menuInitialized by remember { mutableStateOf(false) }
+    val openMenu = { menuInitialized = true; menuOpen = true }
+    MediaRow(
+        title = playlist.name,
+        subtitle = "${playlist.songCount} ${if (playlist.songCount == 1) "song" else "songs"}",
+        onClick = onClick,
+        modifier = modifier,
+        onLongClick = openMenu,
+        leading = {
+            PlaylistCover(playlist, Modifier.size(56.dp).clip(RowCoverShape))
+        },
+        trailing = {
+            IconButton(onClick = openMenu) {
+                SymbolIcon(Symbols.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-    }
+        },
+        menu = {
+            if (menuInitialized) {
+                CenteredDropdownMenu(menuOpen, { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Play") },
+                        leadingIcon = { SymbolIcon(Symbols.Play, null) },
+                        onClick = { menuOpen = false; onPlay() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Shuffle") },
+                        leadingIcon = { SymbolIcon(Symbols.Shuffle, null) },
+                        onClick = { menuOpen = false; onShuffle() },
+                    )
+                }
+            }
+        },
+    )
 }

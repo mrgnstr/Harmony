@@ -1,12 +1,46 @@
 package com.mrgnstr.harmony.core.model
 
+/** One word/syllable timing cue inside a lyric line (OpenSubsonic songLyrics v2). */
+data class LyricWordCue(
+    val startMs: Long,
+    val endMs: Long? = null,
+    val byteStart: Int = 0,
+    val byteEnd: Int = 0,
+    val text: String,
+    val agentId: String? = null,
+)
+
+/** A vocal agent in multi-vocal lyrics (e.g. role="main" vs backing/duet). */
+data class LyricAgent(
+    val id: String,
+    val role: String,
+    val name: String? = null,
+)
+
 /** One lyric line. [startMs] is -1 in unsynced lyrics; an empty [text] in synced lyrics marks an instrumental break. */
-data class LyricLine(val startMs: Long, val text: String) {
+data class LyricLine(
+    val startMs: Long,
+    val text: String,
+    val endMs: Long? = null,
+    val agentId: String? = null,
+    val cues: List<LyricWordCue> = emptyList(),
+    val translation: String? = null,
+    val pronunciation: String? = null,
+) {
     val isBreak: Boolean get() = text.isEmpty()
 }
 
 /** A song's lyrics: [synced] when every line has a start time (sorted by it), else plain text in file order. */
-data class Lyrics(val lines: List<LyricLine>, val synced: Boolean) {
+data class Lyrics(
+    val lines: List<LyricLine>,
+    val synced: Boolean,
+    val lang: String = "und",
+    val kind: String = "main",
+    val agents: List<LyricAgent> = emptyList(),
+    val hasTranslations: Boolean = false,
+    val hasPronunciations: Boolean = false,
+    val hasWordCues: Boolean = false,
+) {
     /** The line playing at [positionMs]: the last one started, -1 before the first (and always in unsynced lyrics). */
     fun activeIndex(positionMs: Long): Int {
         if (!synced) return -1

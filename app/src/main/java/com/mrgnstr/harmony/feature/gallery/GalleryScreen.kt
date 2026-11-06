@@ -149,7 +149,7 @@ fun GalleryRoute(
             }
         }
         item { SectionHeading("Songs", onMore = { onOpenSongs(Seeds[seedIndex].second?.toArgb()) }) }
-        items(songs.size) { i -> SongRow(songs[i], onClick = { viewModel.play(songs, i) }, onMore = {}) }
+        items(songs.size) { i -> SongRow(songs[i], onClick = { viewModel.play(songs, i) }) }
         item { SectionHeading("Material Symbols") }
         item { SymbolsDemo() }
         item { SectionHeading("Motion") }

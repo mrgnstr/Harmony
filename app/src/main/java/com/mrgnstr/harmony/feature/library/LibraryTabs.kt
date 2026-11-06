@@ -17,6 +17,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -27,6 +30,7 @@ import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
+import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.icons.Symbol
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
@@ -88,6 +92,7 @@ private fun LazyGridScope.albumTiles(albums: List<Album>, columns: Int, onOpenAl
 @Composable
 fun SongsTab(viewModel: LibraryViewModel) {
     val songs by viewModel.songs.collectAsStateWithLifecycle()
+    val playingId by viewModel.playingId.collectAsStateWithLifecycle()
     val sorts by viewModel.sorts.collectAsStateWithLifecycle()
     val key = sorts.getValue(LibraryTab.Songs).key
     val list = rememberLazyListState()
@@ -98,7 +103,12 @@ fun SongsTab(viewModel: LibraryViewModel) {
                 PlayShuffleButtons(onPlay = { viewModel.play(songs, 0) }, onShuffle = { viewModel.shuffle(songs) }, modifier = Modifier.padding(bottom = 8.dp))
             }
             itemsIndexed(songs, key = { _, song -> song.id }, contentType = { _, _ -> "song" }) { index, song ->
-                SongRow(song, onClick = { viewModel.play(songs, index) }, modifier = itemMotion())
+                SongRow(
+                    song = song,
+                    onClick = { viewModel.play(songs, index) },
+                    playing = song.id == playingId,
+                    modifier = itemMotion(),
+                )
             }
         }
         // Item 0 is the Play/Shuffle row; the songs follow. Only the orderings by name have letters to show.
@@ -128,10 +138,22 @@ fun ArtistsTab(viewModel: LibraryViewModel, onOpenArtist: (Artist) -> Unit) {
     if (artists.isEmpty()) return LibraryEmpty(viewModel, Symbols.Artist, "No artists", "Artists show up here once your music is found.")
     TileGrid(artists.size, { i -> artists.getOrNull(i)?.takeIf { key == SortKey.Title }?.let { letterOf(it.name) } }) { columns ->
         gridItemsIndexed(artists, key = { _, a -> "artist:${a.name}" }, contentType = { _, _ -> "artist" }) { i, artist ->
+            var menuOpen by remember { mutableStateOf(false) }
+            var menuInitialized by remember { mutableStateOf(false) }
             ArtworkTile(
                 artist.name, null, { onOpenArtist(artist) },
                 itemMotion().padding(gridCellPadding(i % columns, columns)),
                 circular = true,
+                onLongClick = { menuInitialized = true; menuOpen = true },
+                menu = {
+                    if (menuInitialized) {
+                        ArtistContextMenu(
+                            artistName = artist.name,
+                            expanded = menuOpen,
+                            onDismiss = { menuOpen = false },
+                        )
+                    }
+                },
             ) { cover ->
                 // Local files carry no artist photos: the picture is their own image, or the cover of one of their albums.
                 val custom = artist.imagePath

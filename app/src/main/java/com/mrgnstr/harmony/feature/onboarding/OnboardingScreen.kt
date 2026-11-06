@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
+import com.mrgnstr.harmony.core.designsystem.components.NavidromeConnectSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +46,8 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun OnboardingScreen(permission: AudioPermissionState) {
+    var showNavidromeConnect by rememberSaveable { mutableStateOf(false) }
+
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).safeDrawingPadding().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -59,8 +63,8 @@ fun OnboardingScreen(permission: AudioPermissionState) {
         Text("Your music, here", style = MaterialTheme.typography.headlineLargeEmphasized, textAlign = TextAlign.Center)
         Spacer(Modifier.height(12.dp))
         Text(
-            if (permission.denied) "Harmony needs access to your music files to play them. You can allow it in the app's settings."
-            else "Harmony plays the music stored on this device. Allow access to your music files to get started.",
+            if (permission.denied) "Harmony needs access to your music files to play them, or you can connect a Navidrome server."
+            else "Play music stored on this device or connect to your Navidrome server to stream your library anywhere.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -73,6 +77,20 @@ fun OnboardingScreen(permission: AudioPermissionState) {
         ) {
             Text(if (permission.denied) "Open settings" else "Allow access", style = MaterialTheme.typography.titleMedium)
         }
+        Spacer(Modifier.height(12.dp))
+        FilledTonalButton(
+            onClick = { showNavidromeConnect = true },
+            shapes = ButtonDefaults.shapes(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        ) {
+            SymbolIcon(Symbols.Cloud, null)
+            Spacer(Modifier.size(8.dp))
+            Text("Connect to Navidrome", style = MaterialTheme.typography.titleMedium)
+        }
+    }
+
+    if (showNavidromeConnect) {
+        NavidromeConnectSheet(onDismiss = { showNavidromeConnect = false })
     }
 }
 

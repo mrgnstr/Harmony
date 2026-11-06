@@ -20,7 +20,7 @@ interface AlbumColorDao {
 
     @Query(
         "SELECT albumId, MIN(id) AS songId FROM songs " +
-            "WHERE albumId > 0 AND albumId NOT IN (SELECT albumId FROM album_colors) GROUP BY albumId",
+            "WHERE albumId != 0 AND albumId NOT IN (SELECT albumId FROM album_colors) GROUP BY albumId",
     )
     suspend fun missing(): List<MissingAlbum>
 }
