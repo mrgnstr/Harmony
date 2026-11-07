@@ -663,82 +663,114 @@ class SubsonicApiClient @Inject constructor(
             )
         }
 
-        // Map translation and pronunciation lines by start timestamp (or line index for unsynced).
-        val transByStart = HashMap<Long, String>()
-        val transByIndex = ArrayList<String>()
-        translationEntry?.arr("line")?.objects()?.forEach { l ->
-            val v = l.str("value")
-            transByIndex += v
-            l["start"]?.asLongOrNull?.let { s -> transByStart[(s - offsetMs).coerceAtLeast(0L)] = v }
-        }
-        val pronByStart = HashMap<Long, String>()
-        val pronByIndex = ArrayList<String>()
-        pronunciationEntry?.arr("line")?.objects()?.forEach { l ->
-            val v = l.str("value")
-            pronByIndex += v
-            l["start"]?.asLongOrNull?.let { s -> pronByStart[(s - offsetMs).coerceAtLeast(0L)] = v }
-        }
+        // Translation and pronunciation lines map by line index when they line up with the main lines, else by start time.
+        val rawLines = mainEntry.arr("line").objects()
+        val transLines = translationEntry?.arr("line")?.objects().orEmpty()
+        val pronLines = pronunciationEntry?.arr("line")?.objects().orEmpty()
+        val transByIndex = transLines.size == rawLines.size
+        val pronByIndex = pronLines.size == rawLines.size
+        fun byStart(lines: List<JsonObj>, start: Long): String? =
+            lines.firstOrNull { l -> l["start"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) } == start }?.str("value")
+        val pronCueLines = pronunciationEntry?.arr("cueLine")?.objects().orEmpty().groupBy { it.int("index", -1) }
 
-        // Parse word-by-word cueLines if present (songLyrics v2 enhanced=true).
+        // Layers of one line[index]: cueLines sharing an index are parallel (main voice, backing, other voices).
+        val roles = agents.associate { it.id to it.role.lowercase() }
+        val mainVoice = agents.firstOrNull { it.role.equals("main", ignoreCase = true) }?.id ?: agents.firstOrNull()?.id
         val cueLinesByIndex = mainEntry.arr("cueLine").objects().groupBy { it.int("index", -1) }
         var anyWordCues = false
 
-        val rawLines = mainEntry.arr("line").objects()
         val builtLines = ArrayList<LyricLine>(rawLines.size)
         rawLines.forEachIndexed { idx, lineObj ->
             val startRaw = lineObj["start"]?.asLongOrNull
             val startMs = if (synced && startRaw != null) (startRaw - offsetMs).coerceAtLeast(0L) else -1L
             val text = lineObj.str("value")
-            val translation = if (synced && startMs >= 0) transByStart[startMs] else transByIndex.getOrNull(idx)
-            val pronunciation = if (synced && startMs >= 0) pronByStart[startMs] else pronByIndex.getOrNull(idx)
+            val translation = if (transByIndex) transLines.getOrNull(idx)?.str("value") else if (synced && startMs >= 0) byStart(transLines, startMs) else null
+            val pronCl = pronCueLines[idx]?.firstOrNull()
+            val pronunciation = (if (pronByIndex) pronLines.getOrNull(idx)?.str("value") else if (synced && startMs >= 0) byStart(pronLines, startMs) else null)
+                ?: pronCl?.strOrNull("value")
+            val pronunciationCues = pronCl?.let { cuesOf(it, offsetMs, null) }.orEmpty()
+            if (pronunciationCues.isNotEmpty()) anyWordCues = true
 
-            val cueLinesForIdx = cueLinesByIndex[idx].orEmpty()
-            if (cueLinesForIdx.isEmpty()) {
-                builtLines += LyricLine(
-                    startMs = startMs,
-                    text = text,
-                    translation = translation,
-                    pronunciation = pronunciation,
-                )
-            } else {
-                for (cl in cueLinesForIdx) {
-                    val clStart = cl["start"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) } ?: startMs
-                    val clEnd = cl["end"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) }
-                    val agentId = cl.strOrNull("agentId")
-                    val cues = cl.arr("cue").objects().map { c ->
-                        anyWordCues = true
-                        LyricWordCue(
-                            startMs = (c.long("start") - offsetMs).coerceAtLeast(0L),
-                            endMs = c["end"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) },
-                            byteStart = c.int("byteStart"),
-                            byteEnd = c.int("byteEnd"),
-                            text = c.str("value"),
-                            agentId = agentId,
-                        )
-                    }
-                    builtLines += LyricLine(
-                        startMs = clStart,
-                        text = cl.str("value", text),
-                        endMs = clEnd,
-                        agentId = agentId,
-                        cues = cues,
-                        translation = translation,
-                        pronunciation = pronunciation,
-                    )
+            val layers = cueLinesByIndex[idx].orEmpty()
+            val bgLayer = layers.firstOrNull { roles[it.strOrNull("agentId")] == "bg" }
+            val isMain = { cl: JsonObj -> cl.strOrNull("agentId").let { it == null || it == mainVoice } }
+            val mainLayer = layers.firstOrNull { it !== bgLayer && isMain(it) }
+            val others = layers.filter { it !== bgLayer && it !== mainLayer && !isMain(it) }
+            val primary = mainLayer ?: others.firstOrNull()
+            if (primary == null) {
+                if (bgLayer == null) {
+                    builtLines += LyricLine(startMs, text, translation = translation, pronunciation = pronunciation, pronunciationCues = pronunciationCues)
+                } else {
+                    // Only a backing vocal at this index: it stands as a line.
+                    builtLines += cueLineToLine(bgLayer, offsetMs, startMs, text, synced, bgLayer.strOrNull("agentId"), false).also { anyWordCues = anyWordCues || it.cues.isNotEmpty() }
+                        .copy(translation = translation, pronunciation = pronunciation, pronunciationCues = pronunciationCues)
                 }
+                return@forEachIndexed
+            }
+            val agentId = primary.strOrNull("agentId")
+            val duet = primary !== mainLayer
+            val background = bgLayer?.let { stripParens(cueLineToLine(it, offsetMs, startMs, "", synced, agentId, duet)) }?.takeIf { it.text.isNotEmpty() }
+            val line = cueLineToLine(primary, offsetMs, startMs, text, synced, agentId, duet)
+            anyWordCues = anyWordCues || line.cues.isNotEmpty() || background?.cues?.isNotEmpty() == true
+            builtLines += line.copy(
+                translation = translation, pronunciation = pronunciation, pronunciationCues = pronunciationCues, background = background,
+            )
+            // A second voice singing alongside the main one gets its own duet line right after.
+            if (mainLayer != null) for (o in others) {
+                val oid = o.strOrNull("agentId")
+                val l = cueLineToLine(o, offsetMs, startMs, text, synced, oid, true)
+                anyWordCues = anyWordCues || l.cues.isNotEmpty()
+                builtLines += l
             }
         }
         if (builtLines.isEmpty()) return null
         return Lyrics(
-            lines = builtLines,
+            lines = if (synced) builtLines.sortedBy { it.startMs } else builtLines,
             synced = synced,
             lang = lang,
             kind = kind,
             agents = agents,
-            hasTranslations = transByStart.isNotEmpty() || transByIndex.isNotEmpty(),
-            hasPronunciations = pronByStart.isNotEmpty() || pronByIndex.isNotEmpty(),
+            hasTranslations = transLines.isNotEmpty(),
+            hasPronunciations = pronLines.isNotEmpty() || pronCueLines.isNotEmpty(),
             hasWordCues = anyWordCues,
         )
+    }
+
+    private fun cueLineToLine(cl: JsonObj, offsetMs: Long, fallbackStart: Long, fallbackText: String, synced: Boolean, agentId: String?, duet: Boolean): LyricLine {
+        val start = if (synced) cl["start"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) } ?: fallbackStart else -1L
+        val end = if (synced) cl["end"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) } else null
+        val value = cl.str("value").ifEmpty { fallbackText }
+        return LyricLine(start, value, end, agentId, cuesOf(cl, offsetMs, agentId), duet = duet)
+    }
+
+    /** Cue text is sliced from the line's UTF-8 bytes (`byteEnd` inclusive) when the offsets fit, else it is the cue's own value. */
+    private fun cuesOf(cl: JsonObj, offsetMs: Long, agentId: String?): List<LyricWordCue> {
+        val bytes = cl.str("value").toByteArray(Charsets.UTF_8)
+        return cl.arr("cue").objects().map { c ->
+            val bs = c["byteStart"]?.asIntOrNull
+            val be = c["byteEnd"]?.asIntOrNull
+            val sliced = if (bs != null && be != null && bs >= 0 && be >= bs && be < bytes.size) {
+                String(bytes, bs, be - bs + 1, Charsets.UTF_8).takeIf { '\uFFFD' !in it }
+            } else null
+            LyricWordCue(
+                startMs = (c.long("start") - offsetMs).coerceAtLeast(0L),
+                endMs = c["end"]?.asLongOrNull?.let { (it - offsetMs).coerceAtLeast(0L) },
+                byteStart = c.int("byteStart"),
+                byteEnd = c.int("byteEnd"),
+                text = sliced ?: c.str("value"),
+                agentId = agentId,
+            )
+        }
+    }
+
+    /** Backing vocals are usually sent in parentheses; the UI draws them without. */
+    private fun stripParens(l: LyricLine): LyricLine {
+        if (l.cues.isEmpty()) return l.copy(text = l.text.trim().removeSurrounding("(", ")").trim())
+        val cues = l.cues.toMutableList()
+        cues[0] = cues[0].copy(text = cues[0].text.removePrefix("("))
+        cues[cues.lastIndex] = cues.last().let { it.copy(text = it.text.trimEnd().removeSuffix(")")) }
+        cues.removeAll { it.text.isEmpty() }
+        return l.copy(text = cues.joinToString("") { it.text }.trim(), cues = cues)
     }
 
     // --- Transcoding & Streaming ---

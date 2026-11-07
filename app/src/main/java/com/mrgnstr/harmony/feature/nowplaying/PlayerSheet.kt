@@ -47,6 +47,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +63,12 @@ import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -92,6 +99,9 @@ val MiniPlayerGap = 8.dp
 private val MiniMargin = 12.dp
 private val MiniArt = 44.dp
 private val MiniArtRadius = 8.dp
+private val PanelCoverRadius = 12.dp
+/** How blurred the cover behind the lyrics gets (a gaussian sigma). */
+private val PanelBlur = 46.dp
 /** Left gap of the thumbnail: larger than the vertical one so its corners clear the pill's curve. */
 private val MiniArtInset = 14.dp
 /** Release speed in dp/s that throws the mini player away (as tuned in the old app: 2000 px/s on the 11T, without being harder on lower densities). */
@@ -171,7 +181,10 @@ fun PlayerSheet(
         hasAppeared = true
         if (entrance.value > 0f) entrance.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
     }
-    val coverColors = animateCoverColors(viewModel.coverColors.collectAsStateWithLifecycle().value)
+    val panel = rememberPanelState()
+    val vmColors = viewModel.coverColors.collectAsStateWithLifecycle().value
+    // Over the darkened, blurred lyrics background the dark controls of a bright cover would not be seen: they turn light.
+    val coverColors = animateCoverColors(if (panel.panel != NowPlayingPanel.None && vmColors.scrim < 0.01f) DefaultCoverColors else vmColors)
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val lowTier = LocalVisualTier.current == VisualTier.LOW
@@ -179,7 +192,13 @@ fun PlayerSheet(
     val clamped: () -> Float = { state.visual.coerceIn(0f, 1f) }
     // Whether the current drag began with the mini player resting.
     val fromRest = remember { mutableStateOf(false) }
-    StatusBarIconsFollowCover(state, coverColors)
+    StatusBarIconsFollowCover(state, coverColors, panelOpen = panel.panel != NowPlayingPanel.None)
+    panel.sheetProgress = { state.visual.coerceIn(0f, 1f) }
+    ControlsAutoHide(panel, snap.isPlaying)
+    LaunchedEffect(state, panel) {
+        // Collapsed: the next time Now Playing opens it shows the cover.
+        snapshotFlow { state.progress.value < 0.01f && !state.progress.isRunning }.collect { if (it && panel.panel != NowPlayingPanel.None) panel.reset() }
+    }
 
     // Back closes the player; the gesture scrubs the morph and lets go with its own spring.
     PredictiveBackHandler(enabled = state.isExpanded) { events ->
@@ -191,6 +210,9 @@ fun PlayerSheet(
             throw e
         }
     }
+
+    // Back closes the lyrics before it collapses the player (registered last, so it is asked first).
+    BackHandler(enabled = panel.panel != NowPlayingPanel.None && state.isExpanded) { scope.launch { panel.toggle(panel.panel) } }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val screenW = constraints.maxWidth.toFloat()
@@ -215,6 +237,14 @@ fun PlayerSheet(
         val controlsTop = if (compact) fullArt else naturalControlsTop
         val controlsBottom = if (compact) screenH - navBottom else naturalControlsTop + controlsNatural
 
+        // Where the cover goes in a panel: small, top left, with the title beside it.
+        val headerSize = with(density) { PanelCoverSize.toPx() }
+        val headerX = with(density) { PanelSide.toPx() }
+        val headerY = statusTop + with(density) { PanelHeaderTop.toPx() }
+        val listTop = headerY + headerSize + with(density) { 10.dp.toPx() }
+        // The lyrics view starts this much above that, under the header, so the fade at its top has room above the lines.
+        val listOverlap = with(density) { LyricsTopOverlap.toPx() }
+        val liveBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !lowTier
         val cover = rememberCoverTransition(songId, snap.albumId, fullArt.roundToInt())
         val showFull by remember { derivedStateOf { state.progress.value > 0.01f } }
         val showMini by remember { derivedStateOf { state.progress.value < 0.99f } }
@@ -329,7 +359,8 @@ fun PlayerSheet(
                         }
                     },
                 )
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !state.isExpanded) { state.expand() },
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !state.isExpanded) { state.expand() }
+                .panelTouches(panel) { panel.controlsTop - with(density) { 64.dp.toPx() } },
         ) {
 
             // Under the whole scene (cover, blur, controls); taps reach it because the scene is cropped to the cover while collapsed.
@@ -389,34 +420,67 @@ fun PlayerSheet(
                     },
             )
 
-            // The blur around the cover, drawn over it: it fades into the picture's own edge rows.
+            // The blur around the cover, drawn over it: it fades into the picture's own edge rows. In a panel it is the background:
+            // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid towards the top right.
             Box(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
                     alpha = fade(clamped() / 0.15f)
                 },
             ) {
-                if (showFull) {
-                    CoverExtension(
-                        songId = songId, albumId = snap.albumId, cover = cover,
-                        coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips,
-                    )
-                    // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
-                    // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
-                    if (coverColors.scrim > 0.01f) {
-                        val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
-                        val a = coverColors.scrim
-                        Box(
-                            Modifier.fillMaxSize().background(
-                                Brush.verticalGradient(
-                                    from to Color.Transparent,
-                                    from + (1f - from) * 0.25f to Color.Black.copy(alpha = a * 0.7f),
-                                    from + (1f - from) * 0.55f to Color.Black.copy(alpha = a * 0.95f),
-                                    1f to Color.Black.copy(alpha = a),
-                                ),
-                            ),
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val q = panel.q()
+                        val grow = lerp(1f, 1.3f, q)
+                        scaleX = grow; scaleY = grow
+                        translationX = q * 0.09f * screenW
+                        translationY = -q * 0.05f * screenH
+                        if (liveBlur && q > 0.001f) {
+                            // Fully blurred from the first moment the cover moves off it (it is behind the cover until then).
+                            val r = (q / 0.04f).coerceAtMost(1f) * PanelBlur.toPx()
+                            renderEffect = BlurEffect(r, r, TileMode.Clamp)
+                        }
+                    },
+                ) {
+                    if (panel.visible) {
+                        CoverBox(
+                            cover,
+                            Modifier.offset { IntOffset(0, fullArtY.roundToInt()) }.size(with(density) { fullArt.toDp() }),
                         )
                     }
+                    if (showFull) {
+                        CoverExtension(
+                            songId = songId, albumId = snap.albumId, cover = cover,
+                            coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips,
+                        )
+                        // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
+                        // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
+                        if (coverColors.scrim > 0.01f) {
+                            val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
+                            val a = coverColors.scrim
+                            Box(
+                                Modifier.fillMaxSize().background(
+                                    Brush.verticalGradient(
+                                        from to Color.Transparent,
+                                        from + (1f - from) * 0.25f to Color.Black.copy(alpha = a * 0.7f),
+                                        from + (1f - from) * 0.55f to Color.Black.copy(alpha = a * 0.95f),
+                                        1f to Color.Black.copy(alpha = a),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                }
+                if (panel.visible) {
+                    if (!liveBlur) {
+                        // No live blur: the small pre-blurred cover, stretched over everything.
+                        val diffused by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, songId, snap.albumId) {
+                            value = viewModel.diffusedCover(songId, snap.albumId)?.asImageBitmap()
+                        }
+                        diffused?.let { Image(it, null, Modifier.fillMaxSize().graphicsLayer { alpha = panel.q() }, contentScale = ContentScale.Crop) }
+                    }
+                    // The lyrics are white: the background gets darker under them, more on a bright cover.
+                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = panel.q() * (if (coverColors.scrim < 0.01f) 0.5f else 0.38f) }.background(Color.Black))
                 }
             }
 
@@ -424,10 +488,66 @@ fun PlayerSheet(
                 val progress by viewModel.progress.collectAsStateWithLifecycle()
                 val queue by viewModel.queue.collectAsStateWithLifecycle()
                 val favourite by viewModel.isFavourite.collectAsStateWithLifecycle()
+                val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
+                val artists by viewModel.artists.collectAsStateWithLifecycle()
+                val openAlbum = com.mrgnstr.harmony.core.designsystem.LocalOpenAlbum.current
+                val openArtist = com.mrgnstr.harmony.core.designsystem.LocalOpenArtist.current
+                val fileAccess by viewModel.lyricsFileAccess.collectAsStateWithLifecycle()
+                androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+                    viewModel.recheckFileAccess()
+                    onPauseOrDispose {}
+                }
+                if (panel.visible) {
+                    // The lyrics come up from under the cover as it shrinks away (inside the fade above the controls, which stays put).
+                    Box(Modifier.fillMaxSize().graphicsLayer(riding)) {
+                        LyricsView(
+                            lyrics, progress, snap.isPlaying, viewModel::positionNow, panel, listTop - listOverlap, fileAccess, { (1f - panel.q()) * (fullArtY + fullArt - listTop + listOverlap).coerceAtLeast(0f) }, viewModel::seekTo,
+                            Modifier
+                                .offset { IntOffset(0, (listTop - listOverlap).roundToInt()) }
+                                .size(with(density) { screenW.toDp() }, with(density) { (screenH - listTop + listOverlap).toDp() }),
+                        )
+                    }
+                    // The cover itself, on its way to the header (the copy behind it is the background).
+                    CoverBox(
+                        cover,
+                        Modifier
+                            .wrapContentSize(Alignment.TopStart, unbounded = true)
+                            .size(with(density) { fullArt.toDp() }, with(density) { fullArt.toDp() })
+                            .graphicsLayer {
+                                val p = clamped()
+                                val q = panel.q()
+                                val s = lerp(lerp(miniArt / fullArt, 1f, p), headerSize / fullArt, q)
+                                transformOrigin = TransformOrigin(0f, 0f)
+                                scaleX = s; scaleY = s
+                                translationX = lerp(coverLeft(p), headerX, q)
+                                translationY = lerp(coverTop(p), headerY, q) + sag()
+                                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), PanelCoverRadius.toPx(), q) / s
+                                shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
+                                clip = true
+                            }
+                            // After the layer, so the touch area is the cover as drawn: it closes the panel.
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = panel.panel != NowPlayingPanel.None) {
+                                scope.launch { panel.toggle(panel.panel) }
+                            },
+                    )
+                }
                 Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade((clamped() - 0.2f) / 0.8f) }) {
                     CompositionLocalProvider(LocalCoverColors provides coverColors) {
+                        PlayingTitle(
+                            snap, favourite, viewModel::toggleFavourite, panel,
+                            headerShift = headerY + with(density) { PanelCoverSize.toPx() / 2f - TitleRowHeight.toPx() / 2f } - controlsTop,
+                            artists = artists,
+                            onOpenAlbum = {
+                                if (snap.albumId != 0L) {
+                                    openAlbum?.invoke(com.mrgnstr.harmony.core.model.Album(snap.albumId, snap.albumTitle, snap.artist, songId, 0, 0L, 0L))
+                                    state.collapse()
+                                }
+                            },
+                            onOpenArtist = { name -> openArtist?.invoke(name); state.collapse() },
+                            modifier = Modifier.offset { IntOffset(0, controlsTop.roundToInt()) },
+                        )
                         FullPlayerControls(
-                            snap, progress, queue, favourite, viewModel,
+                            snap, progress, queue, favourite, viewModel, panel,
                             Modifier
                                 .offset { IntOffset(0, controlsTop.roundToInt()) }
                                 .size(with(density) { screenW.toDp() }, with(density) { (controlsBottom - controlsTop).toDp() }),
@@ -443,10 +563,11 @@ fun PlayerSheet(
  * The status bar's icons follow what is under them: the cover (or its blur) while Now Playing is open, the theme otherwise.
  */
 @Composable
-private fun StatusBarIconsFollowCover(state: PlayerSheetState, colors: CoverColors) {
+private fun StatusBarIconsFollowCover(state: PlayerSheetState, colors: CoverColors, panelOpen: Boolean) {
     val view = LocalView.current
     val themeDark = MaterialTheme.colorScheme.background.red < 0.5f
-    val coverIsLight = colors.lightTop
+    // The lyrics' background is darkened: light icons.
+    val coverIsLight = colors.lightTop && !panelOpen
     LaunchedEffect(coverIsLight, themeDark) {
         val window = (view.context as? android.app.Activity)?.window ?: return@LaunchedEffect
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)

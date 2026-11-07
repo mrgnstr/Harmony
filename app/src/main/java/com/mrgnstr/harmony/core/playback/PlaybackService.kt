@@ -78,6 +78,7 @@ class PlaybackService : MediaSessionService() {
             packageManager.getLaunchIntentForPackage(packageName)!!.putExtra(EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        livePlayer = player
         session = MediaSession.Builder(this, player).setBitmapLoader(RemoteCoverBitmapLoader(this)).setCallback(ResumptionCallback()).setSessionActivity(open).build()
         history = HistoryRecorder(player, historyDao, appScope) { songId, playedAtMs ->
             navidrome.reportScrobble(songId, playedAtMs, submission = true)
@@ -222,6 +223,15 @@ class PlaybackService : MediaSessionService() {
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) pauseAllPlayersAndStopSelf()
     }
 
+    companion object {
+        /**
+         * The player itself (the service runs in the app's process), for what must be exact on every frame: the position the lyrics
+         * are drawn at. Through the session the controller's position is extrapolated and corrected every 3 s, by up to ~130 ms.
+         * Main thread only.
+         */
+        @Volatile var livePlayer: androidx.media3.common.Player? = null
+    }
+
     override fun onDestroy() {
         persister?.run { flush(); release() }
         persister = null
@@ -233,6 +243,7 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         session = null
+        livePlayer = null
         super.onDestroy()
     }
 }

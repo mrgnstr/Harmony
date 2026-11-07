@@ -208,6 +208,9 @@ class PlayerConnection @Inject constructor(
         }
     }.distinctUntilChanged()
 
+    /** The position right now, from the player itself when this process has it (the controller's is stepped by the session every 3 s); on the main thread. */
+    fun currentPositionMs(): Long = (PlaybackService.livePlayer ?: controller)?.currentPosition?.coerceAtLeast(0) ?: 0L
+
     fun togglePlayPause() = withController { if (it.isPlaying) it.pause() else it.play() }
     fun skipToNext() = withController { it.seekToNextMediaItem() }
     fun skipToPrevious() = withController { it.seekToPreviousMediaItem() }

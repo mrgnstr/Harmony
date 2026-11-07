@@ -9,6 +9,7 @@ import android.util.Log
 import android.util.LruCache
 import com.mrgnstr.harmony.core.model.LrcParser
 import com.mrgnstr.harmony.core.model.Lyrics
+import com.mrgnstr.harmony.core.model.TtmlParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -17,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Lyrics from the `.lrc` file next to the song (`Song.flac` → `Song.lrc`). From Android 11 on, the media permission does not
+ * Lyrics from the `.ttml`, else `.lrc` / `.elrc`, file next to the song (`Song.flac` → `Song.ttml`). From Android 11 on, the media permission does not
  * cover it (not a media file): it needs all-files access ([hasFileAccess]). Embedded lyrics (USLT/SYLT) are not read yet.
  */
 @Singleton
@@ -52,15 +53,15 @@ class LyricsRepository @Inject constructor(@ApplicationContext private val conte
         val path = pathOf(songId) ?: return null
         val song = File(path)
         val base = song.nameWithoutExtension
-        val candidates = listOf(File(song.parentFile, "$base.lrc"), File(song.parentFile, "$base.LRC"))
-        for (file in candidates) {
-            val text = try { if (file.canRead()) file.readText() else null } catch (e: Exception) {
-                Log.w(TAG, "Can't read $file", e)
-                null
-            }
-            text?.let { LrcParser.parse(it) }?.let { return it }
-        }
+        // TTML first (word timing, voices); one that does not parse falls through to the LRC.
+        for (ext in listOf("ttml", "TTML")) read(File(song.parentFile, "$base.$ext"))?.let { TtmlParser.parse(it) }?.let { return it }
+        for (ext in listOf("lrc", "LRC", "elrc", "ELRC")) read(File(song.parentFile, "$base.$ext"))?.let { LrcParser.parse(it) }?.let { return it }
         return null
+    }
+
+    private fun read(file: File): String? = try { if (file.canRead()) file.readText() else null } catch (e: Exception) {
+        Log.w(TAG, "Can't read $file", e)
+        null
     }
 
     @Suppress("DEPRECATION") // DATA is still filled in and readable; it is the only way to the folder the song lies in.

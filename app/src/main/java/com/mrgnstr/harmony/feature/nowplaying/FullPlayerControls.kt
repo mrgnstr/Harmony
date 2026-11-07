@@ -1,6 +1,14 @@
 package com.mrgnstr.harmony.feature.nowplaying
 
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,6 +24,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -41,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -92,50 +102,65 @@ internal fun FullPlayerControls(
     queue: QueueState,
     favourite: Boolean,
     vm: NowPlayingViewModel,
+    panel: PanelState,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.SpaceBetween) {
         val c = LocalCoverColors.current
-        var showLyrics by remember { mutableStateOf(false) }
         var showQueue by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
         val lyrics by vm.lyrics.collectAsStateWithLifecycle()
         val hasNavidrome by vm.hasNavidrome.collectAsStateWithLifecycle()
-
-        // Title block
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                MarqueeText(snap.title, MaterialTheme.typography.headlineSmallEmphasized.copy(fontWeight = FontWeight.Bold), c.text)
-                MarqueeText(snap.artist, MaterialTheme.typography.titleMedium, c.textSoft)
+        // In a panel the title row lives in the panel's header, and the rows from the seek bar down fade away after a while.
+        val controlsShown = remember(panel) { derivedStateOf { panel.controlsHidden.value < 0.98f } }
+        val away = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
+        val hide = Modifier
+            .graphicsLayer {
+                val h = panel.controlsHidden.value
+                alpha = 1f - h
+                translationY = h * away
             }
-            val pop = rememberFlourish(bounce = 0.45f)
-            ModeToggle(favourite, { pop.play(); vm.toggleFavourite() }) { blend, tint ->
-                AnimatedSymbolIcon(
-                    Symbols.Favorite, if (favourite) "Unfavourite" else "Favourite", filled = favourite, tint = tint, blendMode = blend,
-                    modifier = Modifier.graphicsLayer { (0.5f + 0.5f * pop.value.value).let { scaleX = it; scaleY = it } },
-                )
-            }
-        }
+            .placedWhen(controlsShown)
 
-        Column {
+        // The title block is drawn by the sheet ([PlayingTitle]), which slides it into the panels' header; this keeps its room.
+        Spacer(Modifier.height(TitleRowHeight))
+
+        Column(hide) {
             val format by vm.format.collectAsStateWithLifecycle()
-            format?.let { FormatPill(it, Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp)) }
-            SeekBar(progress, snap.isPlaying, vm::seekTo)
+            Box(Modifier.fillMaxWidth().padding(bottom = 4.dp), contentAlignment = Alignment.Center) {
+                format?.let { FormatPill(it, panel) }
+                // Translations and pronunciations: only over lyrics that have them.
+                if (lyrics?.hasTranslations == true || lyrics?.hasPronunciations == true) {
+                    LyricsOptions(
+                        lyrics?.hasTranslations == true, lyrics?.hasPronunciations == true, panel,
+                        Modifier
+                            .align(Alignment.CenterStart)
+                            .graphicsLayer { alpha = panel.q() }
+                            .placedWhen(remember(panel) { derivedStateOf { panel.q() > 0.5f } }),
+                    )
+                }
+            }
+            Box(Modifier.onGloballyPositioned { panel.controlsTop = it.positionInRoot().y }) { SeekBar(progress, snap.isPlaying, vm::seekTo) }
         }
 
         // Transport
         val prevKick = rememberSkipKick(next = false)
         val nextKick = rememberSkipKick(next = true)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+        Row(hide.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(
                 onClick = { prevKick.kick(); vm.previous() }, enabled = snap.hasPrevious || progress.positionMs > 3_000, shapes = IconButtonDefaults.shapes(),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = c.tonal, contentColor = c.text),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
+                ),
                 modifier = Modifier.size(width = 84.dp, height = 64.dp),
             ) { SkipIcon(Symbols.SkipPrevious, "Previous", prevKick, size = 32.dp) }
             // The glyph is cut out of the white button (an offscreen layer lets it clear the container), so the cover shows through.
             PlayButton(snap.isPlaying, vm::togglePlayPause)
             FilledTonalIconButton(
                 onClick = { nextKick.kick(); vm.next() }, enabled = snap.hasNext, shapes = IconButtonDefaults.shapes(),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = c.tonal, contentColor = c.text),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
+                ),
                 modifier = Modifier.size(width = 84.dp, height = 64.dp),
             ) { SkipIcon(Symbols.SkipNext, "Next", nextKick, size = 32.dp) }
         }
@@ -143,8 +168,8 @@ internal fun FullPlayerControls(
         // Modes & overlays: Lyrics, Shuffle, Repeat, Queue, and Bookmark/Jukebox
         val shuffleFlip = rememberFlourish(bounce = 0.8f)
         val repeatSpin = rememberFlourish(bounce = 0.8f)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
-            ModeToggle(showLyrics || lyrics != null, { showLyrics = true }) { blend, tint ->
+        Row(hide.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+            ModeToggle(panel.panel == NowPlayingPanel.Lyrics, { scope.launch { panel.toggle(NowPlayingPanel.Lyrics) } }) { blend, tint ->
                 SymbolIcon(Symbols.Lyrics, "Lyrics", tint = tint, blendMode = blend)
             }
             ModeToggle(queue.shuffled, { shuffleFlip.play(); vm.toggleShuffle() }) { blend, tint ->
@@ -166,14 +191,6 @@ internal fun FullPlayerControls(
             }
         }
 
-        if (showLyrics) {
-            LyricsModalSheet(
-                lyrics = lyrics,
-                positionMs = progress.positionMs,
-                onSeek = vm::seekTo,
-                onDismiss = { showLyrics = false },
-            )
-        }
         if (showQueue) {
             QueueModalSheet(
                 queue = queue,
@@ -189,13 +206,61 @@ internal fun FullPlayerControls(
     }
 }
 
+/** The heart: pops when switched. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun FavouriteToggle(favourite: Boolean, onToggle: () -> Unit) {
+    val pop = rememberFlourish(bounce = 0.45f)
+    ModeToggle(favourite, { pop.play(); onToggle() }) { blend, tint ->
+        AnimatedSymbolIcon(
+            Symbols.Favorite, if (favourite) "Unfavourite" else "Favourite", filled = favourite, tint = tint, blendMode = blend,
+            modifier = Modifier.graphicsLayer { (0.5f + 0.5f * pop.value.value).let { scaleX = it; scaleY = it } },
+        )
+    }
+}
+
+/** The small button over the seek bar in the lyrics: a menu to switch translations and pronunciations on and off, each on its own. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LyricsOptions(hasTranslations: Boolean, hasPronunciations: Boolean, panel: PanelState, modifier: Modifier = Modifier) {
+    val c = LocalCoverColors.current
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        DisposableEffect(panel) { onDispose { panel.buttonRect = null } }
+        Box(Modifier.size(40.dp).clip(CircleShape).onGloballyPositioned { panel.buttonRect = it.boundsInRoot() }) {
+            FrostLayer(panel, Modifier.matchParentSize())
+            FilledTonalIconButton(
+                onClick = { open = true }, shapes = IconButtonDefaults.shapes(),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = c.tonal, contentColor = c.text),
+                modifier = Modifier.size(40.dp),
+            ) { SymbolIcon(Symbols.Translate, "Translations and pronunciation", size = 20.dp, tint = c.text) }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (hasTranslations) {
+                DropdownMenuItem(
+                    text = { Text("Translation") },
+                    onClick = { panel.showTranslation = !panel.showTranslation },
+                    trailingIcon = { if (panel.showTranslation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
+                )
+            }
+            if (hasPronunciations) {
+                DropdownMenuItem(
+                    text = { Text("Pronunciation") },
+                    onClick = { panel.showPronunciation = !panel.showPronunciation },
+                    trailingIcon = { if (panel.showPronunciation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
+                )
+            }
+        }
+    }
+}
+
 /**
  * A tonal toggle in the favourite button's shape. Off: white glyph on translucent white. On: a white button with the glyph
  * cut out of it (an offscreen layer lets it clear the container), like the play button.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, content: @Composable (BlendMode, Color) -> Unit) {
+internal fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, content: @Composable (BlendMode, Color) -> Unit) {
     val c = LocalCoverColors.current
     FilledTonalIconToggleButton(
         checked = checked,
@@ -210,14 +275,19 @@ private fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, con
 
 /** Codec, layout and quality of the playing file, on a translucent pill over the blurred cover. */
 @Composable
-private fun FormatPill(tag: FormatTag, modifier: Modifier = Modifier) {
+private fun FormatPill(tag: FormatTag, panel: PanelState, modifier: Modifier = Modifier) {
     val c = LocalCoverColors.current
-    Row(
-        modifier.clip(CircleShape).background(c.tonal).padding(start = 10.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FormatGlyph(tag.icon, Modifier.padding(end = 6.dp), tint = c.textSoft)
-        Text(tag.text, style = MaterialTheme.typography.labelMedium, color = c.textSoft, maxLines = 1)
+    DisposableEffect(panel) { onDispose { panel.pillRect = null } }
+    Box(modifier.clip(CircleShape).onGloballyPositioned { panel.pillRect = it.boundsInRoot() }) {
+        // Over the lyrics the pill sits on a blur of them.
+        FrostLayer(panel, Modifier.matchParentSize())
+        Row(
+            Modifier.background(c.tonal).padding(start = 10.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FormatGlyph(tag.icon, Modifier.padding(end = 6.dp), tint = c.textSoft)
+            Text(tag.text, style = MaterialTheme.typography.labelMedium, color = c.textSoft, maxLines = 1)
+        }
     }
 }
 
@@ -353,7 +423,7 @@ private const val WaveSpeedDp = 36f
  * clear of the fade and scrolled text still melts into it.
  */
 @Composable
-private fun MarqueeText(text: String, style: TextStyle, color: Color) {
+internal fun MarqueeText(text: String, style: TextStyle, color: Color) {
     val measurer = rememberTextMeasurer()
     val fade = 16.dp
     BoxWithConstraints(

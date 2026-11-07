@@ -24,6 +24,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -42,6 +43,7 @@ class NowPlayingViewModel @Inject constructor(
     private val favourites: FavouritesRepository,
     private val colorStore: ArtworkColorStore,
     private val lyricsRepository: LyricsRepository,
+    private val diffusedArt: com.mrgnstr.harmony.core.artwork.DiffusedArtCache,
     private val libraryRepository: LibraryRepository,
     private val formatProbe: AudioFormatProbe,
     val navidrome: NavidromeRepository,
@@ -79,12 +81,24 @@ class NowPlayingViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Bumped when the lyrics should be looked for again (file access may have been granted). */
+    private val lyricsRefresh = MutableStateFlow(0)
+    private val _fileAccess = MutableStateFlow(lyricsRepository.hasFileAccess())
+    /** Whether the lyric files beside local songs can be read. */
+    val lyricsFileAccess: StateFlow<Boolean> = _fileAccess
+
+    fun recheckFileAccess() {
+        val now = lyricsRepository.hasFileAccess()
+        if (now != _fileAccess.value) { _fileAccess.value = now; lyricsRefresh.value++ }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val lyrics: StateFlow<Lyrics?> = player.state
-        .map { it.songId }
-        .distinctUntilChanged()
+    val lyrics: StateFlow<Lyrics?> = combine(player.state.map { it.songId }.distinctUntilChanged(), lyricsRefresh) { songId, _ -> songId }
         .mapLatest { songId -> if (songId != null) lyricsRepository.lyricsFor(songId) else null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** The cover heavily blurred, small: the lyrics' background where the live blur is off. */
+    suspend fun diffusedCover(songId: Long, albumId: Long) = diffusedArt.get(songId, albumId)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentBookmark: StateFlow<AudioBookmark?> = player.state
@@ -103,6 +117,14 @@ class NowPlayingViewModel @Inject constructor(
             else colorStore.coverSample(songId, albumId)?.let { coverColorsOf(it.dominant, it.bottomLuminance, it.topLuminance) } ?: DefaultCoverColors
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultCoverColors)
+
+    /** The playing song's artist credit split into artists (a collaboration names several); the artist link asks which when there are. */
+    val artists: StateFlow<List<String>> = combine(player.state.map { it.artist }.distinctUntilChanged(), libraryRepository.artistIndex) { credit, index ->
+        if (credit.isBlank()) emptyList() else index.artistsOf(credit)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The playing position at this instant (for per-frame use on the main thread: the lyrics). */
+    fun positionNow(): Long = player.currentPositionMs()
 
     fun toggleFavourite() { player.state.value.songId?.let { id -> viewModelScope.launch { favourites.toggleSong(id) } } }
 

@@ -212,6 +212,50 @@ class SubsonicAndNativeApiTest {
     }
 
     @Test
+    fun structuredLyricsV2DuetBackgroundAndPronunciationCues() {
+        val json = MiniJson.parseArray(
+            """[
+                {"lang":"jpn","kind":"main","synced":true,
+                 "agents":[{"id":"v1","role":"main"},{"id":"v2","role":"voice"},{"id":"b1","role":"bg"}],
+                 "line":[{"start":1000,"value":"Hello ü"},{"start":4000,"value":"Reply"},{"start":6000,"value":"Both"}],
+                 "cueLine":[
+                    {"index":0,"agentId":"v1","start":1000,"end":2000,"value":"Hello ü","cue":[
+                        {"start":1000,"end":1500,"byteStart":0,"byteEnd":5,"value":"Hello "},
+                        {"start":1500,"end":2000,"byteStart":6,"byteEnd":7,"value":"ü"}]},
+                    {"index":0,"agentId":"b1","start":1400,"end":2200,"value":"(ooh)","cue":[
+                        {"start":1400,"end":2200,"byteStart":1,"byteEnd":3,"value":"ooh"}]},
+                    {"index":1,"agentId":"v2","start":4000,"end":5000,"value":"Reply","cue":[
+                        {"start":4000,"end":5000,"byteStart":0,"byteEnd":4,"value":"Reply"}]},
+                    {"index":2,"agentId":"v1","start":6000,"end":7000,"value":"Both"},
+                    {"index":2,"agentId":"v2","start":6200,"end":7000,"value":"Both"}
+                 ]},
+                {"lang":"ja-Latn","kind":"pronunciation","synced":true,
+                 "line":[{"start":1000,"value":"heroh"},{"start":4000,"value":"ripurai"},{"start":6000,"value":"bosu"}],
+                 "cueLine":[{"index":0,"start":1000,"end":2000,"value":"heroh","cue":[
+                    {"start":1000,"end":1500,"byteStart":0,"byteEnd":2,"value":"her"},
+                    {"start":1500,"end":2000,"byteStart":3,"byteEnd":4,"value":"oh"}]}]}
+            ]""",
+        ).objects()
+        val l = subsonic.parseStructuredLyrics(json)!!
+        // line 2 has a second voice beside the main one: it follows as its own duet line.
+        assertEquals(listOf("Hello ü", "Reply", "Both", "Both"), l.lines.map { it.text })
+        val a = l.lines[0]
+        assertFalse(a.duet)
+        assertEquals(listOf("Hello ", "ü"), a.cues.map { it.text })
+        assertEquals("ooh", a.background!!.text)
+        assertEquals(listOf("ooh"), a.background!!.cues.map { it.text })
+        assertEquals(1400L, a.background!!.startMs)
+        assertEquals("heroh", a.pronunciation)
+        assertEquals(listOf("her", "oh"), a.pronunciationCues.map { it.text })
+        assertTrue(l.lines[1].duet)
+        assertEquals("v2", l.lines[1].agentId)
+        assertEquals("ripurai", l.lines[1].pronunciation)
+        assertFalse(l.lines[2].duet)
+        assertTrue(l.lines[3].duet)
+        assertEquals(6200L, l.lines[3].startMs)
+    }
+
+    @Test
     fun transcodeNegotiatorBuildsDecisionAndStreamUrl() = runBlocking {
         server.createContext("/rest/getTranscodeDecision") { ex ->
             val body = ex.requestBody.bufferedReader().readText()
