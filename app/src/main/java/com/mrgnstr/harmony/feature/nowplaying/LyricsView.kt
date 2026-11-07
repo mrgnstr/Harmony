@@ -6,6 +6,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -138,7 +140,7 @@ private const val GlowGrowth = 0.1f
  * What is drawn is ahead of the player's position by this much: the position is of what has been played, the frame shows a
  * frame or two later, and a sweep with a soft edge reads as lit only once the edge has gone by (each word is a quarter of a second).
  */
-private const val SyncLeadMs = 120L
+private const val SyncLeadMs = 180L
 
 /** The lyrics' clock follows its estimate with this time constant, and takes a difference above [SnapMs] (a seek) at once. */
 private const val SlewMs = 120.0
@@ -164,8 +166,12 @@ private val BottomFade = 96.dp
 private const val AnchorShare = 0.085f
 
 // How the lines follow the song: each one springs up to its place, the ones below a little after the one above ("pulled").
-private const val FollowStiffness = 170f
-private const val FollowDamping = 25f
+// The slide is an eased glide (soft start, soft stop) of [FollowMs], started [FollowLeadMs] before the line so it lands as the line starts.
+private const val FollowMs = 480f
+private const val FollowLeadMs = 480L
+private val FollowEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+/** How far a line must run past the next one's start to hold the place (else the glide would wait for it to end). */
+private const val OverlapMs = 150L
 private const val StaggerMs = 45f
 private const val StaggerMax = 7
 private const val BrowseResumeMs = 3_500L
@@ -227,10 +233,10 @@ private fun focusedRow(rows: List<LyricRow>, litEnds: LongArray, p: Long): Int {
     var found = 0
     while (lo <= hi) {
         val mid = (lo + hi) ushr 1
-        if (rows[mid].start - LeadMs <= p) { found = mid; lo = mid + 1 } else hi = mid - 1
+        if (rows[mid].start - FollowLeadMs <= p) { found = mid; lo = mid + 1 } else hi = mid - 1
     }
     var best = found
-    for (i in found - 1 downTo max(0, found - 8)) if (p < litEnds[i]) best = i
+    for (i in found - 1 downTo max(0, found - 8)) if (p < litEnds[i] && litEnds[i] > rows[found].start + OverlapMs) best = i
     return best
 }
 
@@ -292,7 +298,8 @@ private class ListState(val count: Int, initialRef: Int = 0) {
     var tick by mutableIntStateOf(0)
     var kick by mutableIntStateOf(0)
     val off = FloatArray(count)
-    val vel = FloatArray(count)
+    val from = FloatArray(count)
+    val t = FloatArray(count)
     val delayMs = FloatArray(count)
 
     fun dy(i: Int): Float {
@@ -318,6 +325,8 @@ private class ListState(val count: Int, initialRef: Int = 0) {
         val capped = d.coerceIn(-cap, cap)
         for (i in 0 until count) {
             off[i] += capped
+            from[i] = off[i]
+            t[i] = 0f
             delayMs[i] = if (i > new) min(i - new, StaggerMax) * StaggerMs else 0f
         }
         // What the cap took off is a jump.
@@ -334,7 +343,7 @@ private class ListState(val count: Int, initialRef: Int = 0) {
     }
 }
 
-/** Steps every row's spring on the frame clock until all rest. */
+/** Steps every row's glide on the frame clock until all rest. */
 @Composable
 private fun FollowDriver(state: ListState) {
     LaunchedEffect(state) {
@@ -351,14 +360,13 @@ private fun FollowDriver(state: ListState) {
                         moving = true
                         continue
                     }
-                    if (abs(state.off[i]) > 0.3f || abs(state.vel[i]) > 2f) {
-                        val acc = -FollowStiffness * state.off[i] - FollowDamping * state.vel[i]
-                        state.vel[i] += acc * dt
-                        state.off[i] += state.vel[i] * dt
+                    if (state.t[i] < FollowMs) {
+                        state.t[i] += dt * 1000f
+                        val k = FollowEasing.transform((state.t[i] / FollowMs).coerceIn(0f, 1f))
+                        state.off[i] = state.from[i] * (1f - k)
                         moving = true
                     } else {
                         state.off[i] = 0f
-                        state.vel[i] = 0f
                     }
                 }
                 state.tick++
@@ -596,7 +604,7 @@ private fun LineItem(
     // Lit a little before it is sung (and, without syllables, handing over to the next line as that one lights).
     val litEnd = litEndOf(row)
     val lit by remember(row, synced) { derivedStateOf { !synced || pos.value in (row.start - LeadMs) until litEnd } }
-    val litAmount = animateFloatAsState(if (lit) 1f else 0f, tween(300), label = "lit")
+    val litAmount = animateFloatAsState(if (lit) 1f else 0f, tween(if (lit) 300 else 700, easing = FastOutSlowInEasing), label = "lit")
     val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocalVisualTier.current != VisualTier.LOW
     val blurTarget = if (!synced || !canBlur || lit || distance == 0) 0f else min(BlurFirst.value + BlurStep.value * (distance - 1), BlurMax.value)
     val blurDp = animateFloatAsState(blurTarget, tween(400), label = "blur")
