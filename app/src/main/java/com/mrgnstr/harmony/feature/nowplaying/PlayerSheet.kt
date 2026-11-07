@@ -102,6 +102,9 @@ private val MiniArtRadius = 8.dp
 private val PanelCoverRadius = 12.dp
 /** How blurred the cover behind the lyrics gets (a gaussian sigma). */
 private val PanelBlur = 46.dp
+
+/** The panel's progress at which the unblurred strips around the cover have faded out completely. */
+private const val StripsFadeEnd = 0.3f
 /** Left gap of the thumbnail: larger than the vertical one so its corners clear the pill's curve. */
 private val MiniArtInset = 14.dp
 /** Release speed in dp/s that throws the mini player away (as tuned in the old app: 2000 px/s on the 11T, without being harder on lower densities). */
@@ -420,8 +423,28 @@ fun PlayerSheet(
                     },
             )
 
+            // The darkening and the strips are drawn twice while a panel opens or closes (see [stripsOverlay]), so they are shared.
+            val sceneScrim: @Composable () -> Unit = {
+                // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
+                // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
+                if (coverColors.scrim > 0.01f) {
+                    val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
+                    val a = coverColors.scrim
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                from to Color.Transparent,
+                                from + (1f - from) * 0.25f to Color.Black.copy(alpha = a * 0.7f),
+                                from + (1f - from) * 0.55f to Color.Black.copy(alpha = a * 0.95f),
+                                1f to Color.Black.copy(alpha = a),
+                            ),
+                        ),
+                    )
+                }
+            }
+
             // The blur around the cover, drawn over it: it fades into the picture's own edge rows. In a panel it is the background:
-            // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid towards the top right.
+            // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid up.
             Box(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
@@ -433,7 +456,6 @@ fun PlayerSheet(
                         val q = panel.q()
                         val grow = lerp(1f, 1.3f, q)
                         scaleX = grow; scaleY = grow
-                        translationX = q * 0.09f * screenW
                         translationY = -q * 0.05f * screenH
                         if (liveBlur && q > 0.001f) {
                             // Fully blurred from the first moment the cover moves off it (it is behind the cover until then).
@@ -453,22 +475,7 @@ fun PlayerSheet(
                             songId = songId, albumId = snap.albumId, cover = cover,
                             coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips,
                         )
-                        // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
-                        // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
-                        if (coverColors.scrim > 0.01f) {
-                            val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
-                            val a = coverColors.scrim
-                            Box(
-                                Modifier.fillMaxSize().background(
-                                    Brush.verticalGradient(
-                                        from to Color.Transparent,
-                                        from + (1f - from) * 0.25f to Color.Black.copy(alpha = a * 0.7f),
-                                        from + (1f - from) * 0.55f to Color.Black.copy(alpha = a * 0.95f),
-                                        1f to Color.Black.copy(alpha = a),
-                                    ),
-                                ),
-                            )
-                        }
+                        sceneScrim()
                     }
                 }
                 if (panel.visible) {
@@ -530,6 +537,30 @@ fun PlayerSheet(
                                 scope.launch { panel.toggle(panel.panel) }
                             },
                     )
+                }
+                // The scene is blurred as one in a panel, so its progressive blur is gone there; and the panel's cover lies over the
+                // strips' fade into it, which would only appear (snap in) when the panel is gone. So the same strips and darkening,
+                // unblurred, moving with the scene, are drawn over the cover and fade out as the panel opens and back in as it closes.
+                val stripsOverlay by remember { derivedStateOf { liveBlur && panel.visible && panel.q() < StripsFadeEnd + 0.05f } }
+                if (stripsOverlay) {
+                    Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(clamped() / 0.15f) }) {
+                        Box(
+                            Modifier.fillMaxSize().graphicsLayer {
+                                val q = panel.q()
+                                val grow = lerp(1f, 1.3f, q)
+                                scaleX = grow; scaleY = grow
+                                translationY = -q * 0.05f * screenH
+                                val t = (q / StripsFadeEnd).coerceIn(0f, 1f)
+                                alpha = 1f - t * t * (3f - 2f * t)
+                            },
+                        ) {
+                            CoverExtension(
+                                songId = songId, albumId = snap.albumId, cover = cover,
+                                coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips,
+                            )
+                            sceneScrim()
+                        }
+                    }
                 }
                 Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade((clamped() - 0.2f) / 0.8f) }) {
                     CompositionLocalProvider(LocalCoverColors provides coverColors) {

@@ -604,7 +604,7 @@ private fun LineItem(
     // Lit a little before it is sung (and, without syllables, handing over to the next line as that one lights).
     val litEnd = litEndOf(row)
     val lit by remember(row, synced) { derivedStateOf { !synced || pos.value in (row.start - LeadMs) until litEnd } }
-    val litAmount = animateFloatAsState(if (lit) 1f else 0f, tween(if (lit) 300 else 700, easing = FastOutSlowInEasing), label = "lit")
+    val litAmount = animateFloatAsState(if (lit) 1f else 0f, tween(if (lit) 300 else 450, easing = FastOutSlowInEasing), label = "lit")
     val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocalVisualTier.current != VisualTier.LOW
     val blurTarget = if (!synced || !canBlur || lit || distance == 0) 0f else min(BlurFirst.value + BlurStep.value * (distance - 1), BlurMax.value)
     val blurDp = animateFloatAsState(blurTarget, tween(400), label = "blur")

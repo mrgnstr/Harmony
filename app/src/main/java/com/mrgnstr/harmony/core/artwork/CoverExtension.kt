@@ -56,16 +56,16 @@ import kotlinx.coroutines.withContext
 
 // Blur around the full-screen cover. Starting radius at the cover's edge (a gaussian sigma), per side.
 private val TopEdgeBlur = 5.dp
-private val BottomEdgeBlur = 10.dp
+private val BottomEdgeBlur = 5.dp
 
 /** The blurred layers reach this far into the cover, fading in over it, so the picture melts into the blur. */
 private val FadeIntoCover = 15.dp
 
 /**
- * Disc radius reached at the top of the screen; the blur grows linearly from the cover's edge up to it. The same slope
- * (this radius divided by the space above the cover) is used below the cover, so both sides ramp identically.
+ * How fast the blur radius grows with distance from the cover's edge (radius per distance, both in px), the same on both
+ * sides. The radius at the screen's top and bottom edge follows from the room there.
  */
-private val MaxExtraRadius = 57.dp
+private const val BlurSlope = 0.75f
 
 /** The growing blur starts this far from the cover's edge. */
 private val RampDelay = 0.dp
@@ -181,8 +181,7 @@ fun CoverExtension(
         val w = constraints.maxWidth.toFloat()
         val h = constraints.maxHeight.toFloat()
         val coverBottom = coverTopPx + coverSizePx
-        // Both sides use the slope set by the space above the cover.
-        val slope = slopeOverride ?: if (coverTopPx > 1f) with(density) { MaxExtraRadius.toPx() } / coverTopPx else 0.9f
+        val slope = slopeOverride ?: BlurSlope
 
         if (liveShader) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -249,7 +248,7 @@ private fun LiveShaderExtension(
         }
         VariableEdgeBlur(cover, coverTopPx, coverSizePx, w, 0f, boxHeight, coverTopPx, below = false, sigmaPx = sigma,
             startPx = with(density) { RampDelay.toPx() }, distPx = coverTopPx,
-            maxRadiusDp = MaxExtraRadius, mask = mask)
+            maxRadiusDp = Dp(slope * coverTopPx / density.density), mask = mask)
     }
 }
 
