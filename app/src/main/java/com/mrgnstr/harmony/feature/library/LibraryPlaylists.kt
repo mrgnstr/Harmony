@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -200,7 +203,7 @@ private fun PlaylistTile(
                 CenteredDropdownMenu(menuOpen, { menuOpen = false }) {
                     DropdownMenuItem(text = { Text("Play") }, leadingIcon = { SymbolIcon(Symbols.Play, null) }, onClick = { menuOpen = false; onPlay() })
                     DropdownMenuItem(text = { Text("Shuffle") }, leadingIcon = { SymbolIcon(Symbols.Shuffle, null) }, onClick = { menuOpen = false; onShuffle() })
-                    if (!playlist.isFavourites) {
+                    if (!playlist.isFavourites && playlist.editable) {
                         DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { SymbolIcon(Symbols.Edit, null) }, onClick = { menuOpen = false; onEdit() })
                         DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { SymbolIcon(Symbols.Delete, null) }, onClick = { menuOpen = false; onDelete() })
                     }
@@ -221,7 +224,7 @@ private fun PlaylistEditor(initial: Playlist?, onDismiss: () -> Unit, onSave: (n
         if (uri != null) { picked = uri.toString(); reset = false }
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (initial == null) "New Playlist" else "Edit Playlist", style = MaterialTheme.typography.titleLargeEmphasized)
             Box(
                 Modifier.padding(top = 20.dp).size(168.dp).clip(TileCoverShape).clickable {
@@ -369,7 +372,7 @@ fun PlaylistRoute(
         subtitle = playlist?.let { "${it.songCount} ${if (it.songCount == 1) "song" else "songs"}" },
         onBack = onBack,
         actions = {
-            if (playlist != null && !playlist.isFavourites) {
+            if (playlist != null && !playlist.isFavourites && playlist.editable) {
                 Box {
                     IconButton(onClick = { menuOpen = true }) { SymbolIcon(Symbols.MoreVert, "More") }
                     DropdownMenu(menuOpen, { menuOpen = false }) {
@@ -411,7 +414,7 @@ fun PlaylistRoute(
                         onClick = { viewModel.play(index) },
                         subtitle = listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · "),
                         playing = song.id == state.playingId,
-                        onRemoveFromPlaylist = if (playlistId != FAVOURITES_PLAYLIST_ID) ({ viewModel.removeEntry(entry.entryId) }) else null,
+                        onRemoveFromPlaylist = if (playlistId != FAVOURITES_PLAYLIST_ID && playlist?.editable != false) ({ viewModel.removeEntry(entry.entryId) }) else null,
                         modifier = itemMotion(),
                     )
                 }

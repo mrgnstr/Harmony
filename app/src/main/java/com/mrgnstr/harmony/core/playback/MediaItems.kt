@@ -16,6 +16,7 @@ internal const val EXTRA_QUEUED = "harmony.queued"
 internal const val EXTRA_CUSTOM_URI = "harmony.customUri"
 internal const val EXTRA_REMOTE_ID = "harmony.remoteId"
 internal const val EXTRA_SERVER_ID = "harmony.serverId"
+internal const val EXTRA_SONG_ID = "harmony.songId"
 internal const val EXTRA_CODEC = "harmony.codec"
 internal const val EXTRA_BITRATE = "harmony.bitRate"
 internal const val EXTRA_TRACK_GAIN = "harmony.rgTrackGain"
@@ -29,6 +30,7 @@ fun Song.toMediaItem(): MediaItem {
     val resolvedUri = if (!customUri.isNullOrBlank()) Uri.parse(customUri) else uriOf(id)
     val extras = Bundle().apply {
         putLong(EXTRA_ALBUM_ID, albumId)
+        putLong(EXTRA_SONG_ID, id)
         if (!customUri.isNullOrBlank()) putString(EXTRA_CUSTOM_URI, customUri)
         if (!remoteId.isNullOrBlank()) putString(EXTRA_REMOTE_ID, remoteId)
         if (serverId > 0L) putLong(EXTRA_SERVER_ID, serverId)

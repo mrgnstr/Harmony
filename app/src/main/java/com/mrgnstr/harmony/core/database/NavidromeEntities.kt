@@ -324,6 +324,10 @@ data class PendingMutationEntity(
         const val TYPE_UNSTAR = "UNSTAR"
         const val TYPE_RATING = "RATING"
         const val TYPE_SCROBBLE = "SCROBBLE"
+        /** targetId = local playlist id: make the server copy match it (create it first when it has no remoteId). */
+        const val TYPE_PLAYLIST_PUSH = "PLAYLIST_PUSH"
+        /** targetId = the playlist's remote id. */
+        const val TYPE_PLAYLIST_DELETE = "PLAYLIST_DELETE"
         const val TYPE_BOOKMARK_CREATE = "BOOKMARK_CREATE"
         const val TYPE_BOOKMARK_DELETE = "BOOKMARK_DELETE"
     }

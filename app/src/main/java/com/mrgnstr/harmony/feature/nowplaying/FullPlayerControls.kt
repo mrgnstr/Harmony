@@ -64,6 +64,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import com.mrgnstr.harmony.core.model.FormatTag
+import com.mrgnstr.harmony.core.designsystem.components.FormatGlyph
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mrgnstr.harmony.core.designsystem.icons.AnimatedSymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
@@ -93,25 +98,14 @@ internal fun FullPlayerControls(
         val c = LocalCoverColors.current
         var showLyrics by remember { mutableStateOf(false) }
         var showQueue by remember { mutableStateOf(false) }
-        var showBookmarks by remember { mutableStateOf(false) }
         val lyrics by vm.lyrics.collectAsStateWithLifecycle()
-        val bookmark by vm.currentBookmark.collectAsStateWithLifecycle()
-        val jukebox by vm.jukeboxState.collectAsStateWithLifecycle()
         val hasNavidrome by vm.hasNavidrome.collectAsStateWithLifecycle()
-        val hasJukeboxRole by vm.hasJukeboxRole.collectAsStateWithLifecycle()
 
         // Title block
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 MarqueeText(snap.title, MaterialTheme.typography.headlineSmallEmphasized.copy(fontWeight = FontWeight.Bold), c.text)
-                val subLine = remember(snap.artist, snap.codec, snap.bitRateKbps, snap.isRemote) {
-                    val badge = if (snap.codec != null) {
-                        val kbps = snap.bitRateKbps.takeIf { it > 0 }?.let { " ${it}k" }.orEmpty()
-                        "${snap.codec}$kbps"
-                    } else null
-                    listOfNotNull(snap.artist.takeIf { it.isNotBlank() }, badge).joinToString(" · ")
-                }
-                MarqueeText(subLine, MaterialTheme.typography.titleMedium, c.textSoft)
+                MarqueeText(snap.artist, MaterialTheme.typography.titleMedium, c.textSoft)
             }
             val pop = rememberFlourish(bounce = 0.45f)
             ModeToggle(favourite, { pop.play(); vm.toggleFavourite() }) { blend, tint ->
@@ -122,7 +116,11 @@ internal fun FullPlayerControls(
             }
         }
 
-        SeekBar(progress, snap.isPlaying, vm::seekTo)
+        Column {
+            val format by vm.format.collectAsStateWithLifecycle()
+            format?.let { FormatPill(it, Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp)) }
+            SeekBar(progress, snap.isPlaying, vm::seekTo)
+        }
 
         // Transport
         val prevKick = rememberSkipKick(next = false)
@@ -166,17 +164,6 @@ internal fun FullPlayerControls(
             ModeToggle(showQueue, { showQueue = true }) { blend, tint ->
                 SymbolIcon(Symbols.QueueMusic, "Queue", tint = tint, blendMode = blend)
             }
-            if (snap.isRemote || hasNavidrome) {
-                ModeToggle(bookmark != null || jukebox.active, { showBookmarks = true }) { blend, tint ->
-                    SymbolIcon(
-                        if (jukebox.active) Symbols.Speaker else Symbols.Bookmark,
-                        "Bookmarks & Output",
-                        tint = tint,
-                        blendMode = blend,
-                        fill = if (bookmark != null || jukebox.active) 1f else 0f,
-                    )
-                }
-            }
         }
 
         if (showLyrics) {
@@ -199,20 +186,6 @@ internal fun FullPlayerControls(
                 onDismiss = { showQueue = false },
             )
         }
-        if (showBookmarks) {
-            BookmarksAndJukeboxSheet(
-                bookmark = bookmark,
-                positionMs = progress.positionMs,
-                jukebox = jukebox,
-                hasJukeboxRole = hasJukeboxRole,
-                onSaveBookmark = vm::saveBookmark,
-                onJumpToBookmark = vm::seekTo,
-                onDeleteBookmark = vm::deleteBookmark,
-                onToggleJukebox = vm::toggleJukebox,
-                onJukeboxCommand = vm::sendJukeboxCommand,
-                onDismiss = { showBookmarks = false },
-            )
-        }
     }
 }
 
@@ -233,6 +206,19 @@ private fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, con
         ),
         modifier = Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
     ) { content(if (checked) BlendMode.Clear else BlendMode.SrcOver, if (checked) c.onAccent else c.text) }
+}
+
+/** Codec, layout and quality of the playing file, on a translucent pill over the blurred cover. */
+@Composable
+private fun FormatPill(tag: FormatTag, modifier: Modifier = Modifier) {
+    val c = LocalCoverColors.current
+    Row(
+        modifier.clip(CircleShape).background(c.tonal).padding(start = 10.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FormatGlyph(tag.icon, Modifier.padding(end = 6.dp), tint = c.textSoft)
+        Text(tag.text, style = MaterialTheme.typography.labelMedium, color = c.textSoft, maxLines = 1)
+    }
 }
 
 /**

@@ -78,7 +78,7 @@ class PlaybackService : MediaSessionService() {
             packageManager.getLaunchIntentForPackage(packageName)!!.putExtra(EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).setSessionActivity(open).build()
+        session = MediaSession.Builder(this, player).setBitmapLoader(RemoteCoverBitmapLoader(this)).setCallback(ResumptionCallback()).setSessionActivity(open).build()
         history = HistoryRecorder(player, historyDao, appScope) { songId, playedAtMs ->
             navidrome.reportScrobble(songId, playedAtMs, submission = true)
         }

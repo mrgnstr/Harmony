@@ -64,7 +64,14 @@ class AudioFormatProbe @Inject constructor(@ApplicationContext private val conte
                 }
             }
             val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
-            return AudioFormat(codec, AudioFormat.isLossless(mime), rate, bits, channels)
+            // Lossy bitrate: the header's figure when the extractor has one, else the file's average (size over duration).
+            var kbps = if (format.containsKey(MediaFormat.KEY_BIT_RATE)) format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000 else 0
+            if (kbps <= 0 && format.containsKey(MediaFormat.KEY_DURATION)) {
+                val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                val us = format.getLong(MediaFormat.KEY_DURATION)
+                if (size > 0 && us > 0) kbps = (size * 8_000L / us).toInt()
+            }
+            return AudioFormat(codec, AudioFormat.isLossless(mime), rate, bits, channels, kbps)
         } finally {
             extractor.release()
         }

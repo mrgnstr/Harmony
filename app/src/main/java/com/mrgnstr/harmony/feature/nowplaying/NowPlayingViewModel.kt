@@ -10,7 +10,10 @@ import com.mrgnstr.harmony.core.data.FavouritesRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
 import com.mrgnstr.harmony.core.data.LyricsRepository
 import com.mrgnstr.harmony.core.data.NavidromeRepository
+import com.mrgnstr.harmony.core.mediastore.AudioFormatProbe
 import com.mrgnstr.harmony.core.model.AudioBookmark
+import com.mrgnstr.harmony.core.model.AudioFormat
+import com.mrgnstr.harmony.core.model.FormatTag
 import com.mrgnstr.harmony.core.model.JukeboxState
 import com.mrgnstr.harmony.core.model.Lyrics
 import com.mrgnstr.harmony.core.playback.PlaybackProgress
@@ -40,6 +43,7 @@ class NowPlayingViewModel @Inject constructor(
     private val colorStore: ArtworkColorStore,
     private val lyricsRepository: LyricsRepository,
     private val libraryRepository: LibraryRepository,
+    private val formatProbe: AudioFormatProbe,
     val navidrome: NavidromeRepository,
 ) : ViewModel() {
     val snapshot: StateFlow<PlaybackSnapshot> = player.state
@@ -58,6 +62,22 @@ class NowPlayingViewModel @Inject constructor(
         combine(favourites.songIds, player.state.map { it.songId }.distinctUntilChanged()) { ids, id -> id != null && id in ids }
             .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** The playing song's format pill: probed from the file for local songs, from the server's metadata for remote ones. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val format: StateFlow<FormatTag?> = player.state
+        .map { it.songId }
+        .distinctUntilChanged()
+        .mapLatest { id ->
+            when {
+                id == null -> null
+                id > 0 -> formatProbe.probe(id)
+                else -> libraryRepository.songs.first().firstOrNull { it.id == id }?.let { s ->
+                    s.codec?.let { AudioFormat(it, s.lossless, s.sampleRateHz, s.bitDepth, s.channels, s.bitRateKbps) }
+                }
+            }?.pill
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val lyrics: StateFlow<Lyrics?> = player.state

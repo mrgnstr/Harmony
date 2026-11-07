@@ -80,7 +80,7 @@ import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
-import com.mrgnstr.harmony.core.designsystem.icons.DolbyLogo
+import com.mrgnstr.harmony.core.designsystem.components.FormatGlyph
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
 import com.mrgnstr.harmony.core.designsystem.components.AlbumGridPage
@@ -280,13 +280,7 @@ private fun Tags(state: AlbumUiState) {
 private fun Tag(text: String, icon: FormatIcon?) {
     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer) {
         Row(Modifier.padding(start = if (icon != null) 10.dp else 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            when (icon) {
-                null -> Unit
-                FormatIcon.Dolby -> DolbyLogo(Modifier.padding(end = 6.dp), size = 12.dp)
-                FormatIcon.Surround -> SymbolIcon(Symbols.SurroundSound, null, Modifier.padding(end = 6.dp), size = 18.dp)
-                FormatIcon.Lossless -> SymbolIcon(Symbols.Hd, null, Modifier.padding(end = 6.dp), size = 18.dp)
-                FormatIcon.Lossy -> SymbolIcon(Symbols.MusicNote, null, Modifier.padding(end = 6.dp), size = 18.dp)
-            }
+            if (icon != null) FormatGlyph(icon, Modifier.padding(end = 6.dp))
             Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }

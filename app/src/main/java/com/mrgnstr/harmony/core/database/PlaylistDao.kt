@@ -64,4 +64,23 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
+
+    /** Server ids of a playlist's remote songs in order; local songs are not part of the server's copy. */
+    @Query("SELECT s.remoteId FROM playlist_songs ps JOIN songs s ON s.id = ps.songId WHERE ps.playlistId = :playlistId AND s.remoteId IS NOT NULL ORDER BY ps.position, ps.id")
+    suspend fun remoteSongIds(playlistId: Long): List<String>
+
+    @Query("UPDATE playlists SET remoteId = :remoteId WHERE id = :id")
+    suspend fun setRemoteId(id: Long, remoteId: String)
+
+    @Query("SELECT id, remoteId FROM playlists WHERE serverId = :serverId AND remoteId IS NOT NULL")
+    suspend fun serverPlaylistIds(serverId: Long): List<PlaylistRemoteRef>
+
+    /** The pull replaces the server's songs only: local songs in the same playlist stay, after them. */
+    @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId < 0")
+    suspend fun clearRemoteSongs(playlistId: Long)
+
+    @Query("UPDATE playlist_songs SET position = position + :by WHERE playlistId = :playlistId AND songId > 0")
+    suspend fun shiftLocalSongs(playlistId: Long, by: Int)
 }
+
+data class PlaylistRemoteRef(val id: Long, val remoteId: String)

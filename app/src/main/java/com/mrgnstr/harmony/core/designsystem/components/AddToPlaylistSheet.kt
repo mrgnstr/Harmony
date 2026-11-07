@@ -48,7 +48,7 @@ fun AddToPlaylistSheet(playlists: List<Playlist>, onPick: (Playlist) -> Unit, on
                 item(key = "new") {
                     PlaylistChoice(Symbols.Add, "New Playlist", null) { naming = true }
                 }
-                items(playlists, key = { it.id }) { playlist ->
+                items(playlists.filter { it.editable }, key = { it.id }) { playlist ->
                     PlaylistChoice(Symbols.QueueMusic, playlist.name, "${playlist.songCount} ${if (playlist.songCount == 1) "song" else "songs"}") { onPick(playlist) }
                 }
             }

@@ -30,6 +30,8 @@ data class Playlist(
     val coverArtId: String? = null,
     val userRating: Int = 0,
     val starred: Boolean = false,
+    /** False for other users' public playlists and server-generated (smart) ones: they can be played but not changed. */
+    val editable: Boolean = true,
 ) {
     val isFavourites: Boolean get() = id == FAVOURITES_PLAYLIST_ID
     val isRemote: Boolean get() = serverId > 0L || !remoteId.isNullOrEmpty()

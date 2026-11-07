@@ -1,11 +1,30 @@
 package com.mrgnstr.harmony.core.model
 
 /** Technical format of one audio file. [bitDepth] is 0 when it could not be determined. */
-data class AudioFormat(val codec: String, val lossless: Boolean, val sampleRateHz: Int, val bitDepth: Int, val channels: Int = 2) {
+data class AudioFormat(val codec: String, val lossless: Boolean, val sampleRateHz: Int, val bitDepth: Int, val channels: Int = 2, val bitRateKbps: Int = 0) {
     /** Beyond 24-bit / 48 kHz, the same line Apple draws between Lossless and Hi-Res Lossless. */
     val hiRes: Boolean get() = lossless && (sampleRateHz > 48_000 || bitDepth > 24)
 
     val atmos: Boolean get() = codec == DOLBY_ATMOS
+
+    /**
+     * Now Playing's pill: "[layout ]codec" and then bit depth + sample rate for lossless, bitrate + sample rate for lossy
+     * (each part left out when unknown).
+     */
+    val pill: FormatTag get() {
+        val layout = channelLayout(channels)
+        val dolby = codec in DolbyCodecs
+        val name = if (layout != null && !atmos) "$layout $codec" else codec
+        val rate = sampleRateHz.takeIf { it > 0 }?.let { hz -> "${(hz / 1000.0).toString().removeSuffix(".0")} kHz" }
+        val detail = if (lossless) bitDepth.takeIf { it > 0 }?.let { "$it-bit" } else bitRateKbps.takeIf { it > 0 }?.let { "$it kbps" }
+        val icon = when {
+            dolby -> FormatIcon.Dolby
+            layout != null -> FormatIcon.Surround
+            lossless -> FormatIcon.Lossless
+            else -> FormatIcon.Lossy
+        }
+        return FormatTag(listOfNotNull(name, detail, rate).joinToString(" · "), icon)
+    }
 
     companion object {
         const val DOLBY_ATMOS = "Dolby Atmos"
@@ -75,7 +94,7 @@ data class AudioFormat(val codec: String, val lossless: Boolean, val sampleRateH
             }.distinct().take(limit)
         }
 
-        private val DolbyCodecs = setOf(DOLBY_ATMOS, "E-AC-3", "AC-3", "TrueHD")
+        internal val DolbyCodecs = setOf(DOLBY_ATMOS, "E-AC-3", "AC-3", "TrueHD")
     }
 }
 

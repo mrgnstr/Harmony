@@ -24,8 +24,9 @@ class PlaylistRepository @Inject constructor(
     private val dao: PlaylistDao,
     private val covers: PlaylistCoverStore,
     private val favourites: FavouritesRepository,
+    private val navidrome: NavidromeRepository,
 ) {
-    val playlists: Flow<List<Playlist>> = combine(dao.observePlaylists(), dao.observeMembers()) { playlists, members ->
+    val playlists: Flow<List<Playlist>> = combine(dao.observePlaylists(), dao.observeMembers(), navidrome.activeAccount) { playlists, members, account ->
         val byPlaylist = members.groupBy { it.playlistId }
         playlists.map { p ->
             val rows = byPlaylist[p.id].orEmpty()
@@ -46,6 +47,7 @@ class PlaylistRepository @Inject constructor(
                 coverArtId = p.coverArtId,
                 userRating = p.userRating,
                 starred = p.starred,
+                editable = !p.isSmart && !p.readonly && (p.serverId == 0L || p.owner.isNullOrBlank() || p.owner.equals(account?.username, ignoreCase = true)),
             )
         }
     }.flowOn(Dispatchers.Default)
@@ -63,11 +65,17 @@ class PlaylistRepository @Inject constructor(
     suspend fun create(name: String, coverUri: String? = null, songIds: List<Long> = emptyList()): Long {
         val coverPath = coverUri?.let { covers.save(it) }
         val now = System.currentTimeMillis()
-        return db.withTransaction {
-            val id = dao.insert(PlaylistEntity(name = name.trim(), coverPath = coverPath, createdAtMs = now, updatedAtMs = now))
+        // While a server is connected a new playlist is made on it too (its remote songs; local songs stay on the phone).
+        val account = navidrome.activeAccount.value
+        val id = db.withTransaction {
+            val id = dao.insert(
+                PlaylistEntity(name = name.trim(), coverPath = coverPath, createdAtMs = now, updatedAtMs = now, serverId = account?.id ?: 0L, owner = account?.username),
+            )
             if (songIds.isNotEmpty()) dao.insertSongs(songIds.mapIndexed { i, s -> PlaylistSongEntity(playlistId = id, songId = s, position = i, addedAtMs = now) })
             id
         }
+        if (account != null) navidrome.queuePlaylistPush(id)
+        return id
     }
 
     suspend fun addSongs(playlistId: Long, songIds: List<Long>) {
@@ -78,6 +86,7 @@ class PlaylistRepository @Inject constructor(
             dao.insertSongs(songIds.mapIndexed { i, s -> PlaylistSongEntity(playlistId = playlistId, songId = s, position = start + i, addedAtMs = now) })
             dao.touch(playlistId, now)
         }
+        pushIfRemote(playlistId)
     }
 
     suspend fun removeEntry(playlistId: Long, entryId: Long) {
@@ -85,6 +94,7 @@ class PlaylistRepository @Inject constructor(
             dao.deleteEntry(entryId)
             dao.touch(playlistId, System.currentTimeMillis())
         }
+        pushIfRemote(playlistId)
     }
 
     /** Renames, and when [newCoverUri] is given replaces the cover; [clearCover] goes back to the generated one. */
@@ -97,11 +107,18 @@ class PlaylistRepository @Inject constructor(
             if (saved != null) dao.setCover(id, saved, now) else if (clearCover) dao.setCover(id, null, now)
         }
         if (saved != null || clearCover) covers.delete(old)
+        pushIfRemote(id)
     }
 
     suspend fun delete(id: Long) {
         val cover = dao.coverPath(id)
+        val entity = dao.getById(id)
         dao.delete(id)
         covers.delete(cover)
+        if (entity != null && entity.serverId > 0L) navidrome.queuePlaylistDelete(id, entity.remoteId)
+    }
+
+    private suspend fun pushIfRemote(id: Long) {
+        if ((dao.getById(id)?.serverId ?: 0L) > 0L) navidrome.queuePlaylistPush(id)
     }
 }

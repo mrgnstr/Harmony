@@ -470,7 +470,16 @@ class NavidromeRepository @Inject constructor(
 
         val remotePlaylists = subsonic.getPlaylists(account)
         val now = System.currentTimeMillis()
+        // Local edits not yet on the server win over the pull, and a playlist deleted here must not come back before its delete lands.
+        val pending = navidromeDao.pendingMutations(account.id)
+        val dirty = pending.filter { it.type == PendingMutationEntity.TYPE_PLAYLIST_PUSH }.mapNotNull { it.targetId.toLongOrNull() }.toSet()
+        val deleting = pending.filter { it.type == PendingMutationEntity.TYPE_PLAYLIST_DELETE }.map { it.targetId }.toSet()
+        // Playlists deleted on the server (or by another client) go here too.
+        val onServer = remotePlaylists.map { it.remoteId }.toSet()
+        playlistDao.serverPlaylistIds(serverId).filter { it.remoteId !in onServer && it.id !in dirty }.forEach { playlistDao.delete(it.id) }
         for (rp in remotePlaylists) {
+            if (rp.remoteId in deleting) continue
+            if (playlistDao.getByRemoteId(serverId, rp.remoteId)?.let { it.id in dirty } == true) continue
             val detail = runCatching { subsonic.getPlaylist(account, rp.remoteId) }.getOrDefault(rp)
             val nativeMeta = nativeSummaries[rp.remoteId]
             val existing = playlistDao.getByRemoteId(serverId, rp.remoteId)
@@ -500,7 +509,8 @@ class NavidromeRepository @Inject constructor(
                     playlistDao.upsertPlaylist(entity)
                     entity.id
                 }
-                playlistDao.clearPlaylistSongs(localPlaylistId)
+                playlistDao.clearRemoteSongs(localPlaylistId)
+                playlistDao.shiftLocalSongs(localPlaylistId, detail.songs.size)
                 if (detail.songs.isNotEmpty()) {
                     playlistDao.insertSongs(
                         detail.songs.mapIndexed { idx, s ->
@@ -674,6 +684,11 @@ class NavidromeRepository @Inject constructor(
                         subsonic.scrobble(acc, listOf(m.targetId), listOf(t), submission = true)
                         true
                     }
+                    PendingMutationEntity.TYPE_PLAYLIST_PUSH -> pushPlaylist(acc, m.targetId.toLong())
+                    PendingMutationEntity.TYPE_PLAYLIST_DELETE -> {
+                        subsonic.deletePlaylist(acc, m.targetId)
+                        true
+                    }
                     PendingMutationEntity.TYPE_BOOKMARK_CREATE -> {
                         val obj = MiniJson.parseObject(m.payloadJson)
                         subsonic.createBookmark(acc, m.targetId, obj.long("positionMs", 0L), obj.str("comment"))
@@ -692,6 +707,42 @@ class NavidromeRepository @Inject constructor(
                 break // Still offline; retry next time
             }
         }
+    }
+
+    /** Queues "make the server's copy of this playlist match the local one" (one per playlist) and tries it right away. */
+    suspend fun queuePlaylistPush(localId: Long) {
+        val account = activeAccount.value ?: return
+        val id = localId.toString()
+        val queued = navidromeDao.pendingMutations(account.id).any { it.type == PendingMutationEntity.TYPE_PLAYLIST_PUSH && it.targetId == id }
+        if (!queued) enqueueMutation(account.id, PendingMutationEntity.TYPE_PLAYLIST_PUSH, id, "playlist")
+        scope.launch { flushPendingMutations(account) }
+    }
+
+    /** The playlist is gone locally: forget its pending push and delete the server's copy (nothing to do if it never got one). */
+    suspend fun queuePlaylistDelete(localId: Long, remoteId: String?) {
+        val account = activeAccount.value ?: return
+        navidromeDao.pendingMutations(account.id)
+            .filter { it.type == PendingMutationEntity.TYPE_PLAYLIST_PUSH && it.targetId == localId.toString() }
+            .forEach { navidromeDao.deleteMutation(it.id) }
+        if (remoteId.isNullOrBlank()) return
+        enqueueMutation(account.id, PendingMutationEntity.TYPE_PLAYLIST_DELETE, remoteId, "playlist")
+        scope.launch { flushPendingMutations(account) }
+    }
+
+    /** True when done (also when the playlist no longer exists). Create-with-id replaces the song list; the name goes through update. */
+    private suspend fun pushPlaylist(account: ServerAccount, localId: Long): Boolean {
+        val playlist = playlistDao.getById(localId) ?: return true
+        val songIds = playlistDao.remoteSongIds(localId)
+        val remoteId = playlist.remoteId
+        if (remoteId.isNullOrBlank()) {
+            val created = subsonic.createPlaylist(account, playlist.name, songIds)
+            if (created.remoteId.isBlank()) return false
+            playlistDao.setRemoteId(localId, created.remoteId)
+        } else {
+            subsonic.createPlaylist(account, playlist.name, songIds, playlistRemoteId = remoteId)
+            subsonic.updatePlaylist(account, remoteId, name = playlist.name)
+        }
+        return true
     }
 
     private suspend fun enqueueMutation(
