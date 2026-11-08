@@ -11,10 +11,8 @@ import com.mrgnstr.harmony.core.data.LibraryRepository
 import com.mrgnstr.harmony.core.data.LyricsRepository
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.mediastore.AudioFormatProbe
-import com.mrgnstr.harmony.core.model.AudioBookmark
 import com.mrgnstr.harmony.core.model.AudioFormat
 import com.mrgnstr.harmony.core.model.FormatTag
-import com.mrgnstr.harmony.core.model.JukeboxState
 import com.mrgnstr.harmony.core.model.Lyrics
 import com.mrgnstr.harmony.core.playback.NightcoreSpeed
 import com.mrgnstr.harmony.core.playback.PlaybackProgress
@@ -52,9 +50,6 @@ class NowPlayingViewModel @Inject constructor(
 ) : ViewModel() {
     val snapshot: StateFlow<PlaybackSnapshot> = player.state
     val queue: StateFlow<QueueState> = player.queue
-    val jukeboxState: StateFlow<JukeboxState> = navidrome.jukeboxState
-    val hasJukeboxRole: StateFlow<Boolean> = navidrome.activeAccount.map { it?.jukeboxRole == true || it?.isAdmin == true }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val nightcore: StateFlow<Boolean> = settings.nightcore.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     val nightcoreSpeed: StateFlow<Float> = settings.nightcoreSpeed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NightcoreSpeed)
@@ -111,13 +106,6 @@ class NowPlayingViewModel @Inject constructor(
     /** The cover heavily blurred, small: the lyrics' background where the live blur is off. */
     suspend fun diffusedCover(songId: Long, albumId: Long) = diffusedArt.get(songId, albumId)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val currentBookmark: StateFlow<AudioBookmark?> = player.state
-        .map { it.songId }
-        .distinctUntilChanged()
-        .flatMapLatest { songId -> if (songId != null) navidrome.observeBookmarkForSong(songId) else flowOf(null) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
     /** The controls' colours, from the cover's palette; re-resolved when the album changes, not on every song within one album. */
     @OptIn(ExperimentalCoroutinesApi::class)
     val coverColors: StateFlow<CoverColors> = player.state
@@ -153,34 +141,4 @@ class NowPlayingViewModel @Inject constructor(
     fun skipToQueueIndex(index: Int) = player.skipToQueueIndex(index)
     fun removeQueueItem(index: Int) = player.removeQueueItem(index)
     fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
-
-    fun saveBookmark(note: String) {
-        val songId = snapshot.value.songId ?: return
-        val pos = progress.value.positionMs
-        viewModelScope.launch {
-            val song = libraryRepository.songs.first().firstOrNull { it.id == songId } ?: return@launch
-            navidrome.saveBookmark(song, pos, note)
-        }
-    }
-
-    fun deleteBookmark() {
-        val songId = snapshot.value.songId ?: return
-        viewModelScope.launch { navidrome.deleteBookmark(songId) }
-    }
-
-    fun toggleJukebox(active: Boolean) {
-        viewModelScope.launch {
-            navidrome.setJukeboxActive(active)
-            if (active) {
-                val ids = queue.value.items.map { it.songId }
-                val allSongs = libraryRepository.songs.first().associateBy { it.id }
-                val songs = ids.mapNotNull { allSongs[it] }
-                if (songs.isNotEmpty()) navidrome.controlJukebox("set", songs = songs)
-            }
-        }
-    }
-
-    fun sendJukeboxCommand(action: String, gain: Float? = null) {
-        viewModelScope.launch { navidrome.controlJukebox(action, gain = gain) }
-    }
 }

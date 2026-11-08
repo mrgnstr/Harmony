@@ -175,7 +175,7 @@ internal fun FullPlayerControls(
             ) { SkipIcon(Symbols.SkipNext, "Next", nextKick, size = 32.dp) }
         }
 
-        // Modes & overlays: Lyrics, Shuffle, Repeat, Queue, and Bookmark/Jukebox
+        // Modes & overlays: Lyrics, Shuffle, Nightcore, Repeat, Queue
         val shuffleFlip = rememberFlourish(bounce = 0.8f)
         Row(hide.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
             val lyricsKick = rememberLyricsKick()

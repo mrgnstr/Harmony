@@ -5,7 +5,6 @@ import com.mrgnstr.harmony.core.model.ArtistExtraInfo
 import com.mrgnstr.harmony.core.model.AudioBookmark
 import com.mrgnstr.harmony.core.model.AudioFormat
 import com.mrgnstr.harmony.core.model.DiscTitleInfo
-import com.mrgnstr.harmony.core.model.JukeboxState
 import com.mrgnstr.harmony.core.model.LyricAgent
 import com.mrgnstr.harmony.core.model.LyricLine
 import com.mrgnstr.harmony.core.model.LyricWordCue
@@ -935,37 +934,6 @@ class SubsonicApiClient @Inject constructor(
 
     suspend fun deleteInternetRadioStation(account: ServerAccount, remoteId: String) {
         call(account, "deleteInternetRadioStation", listOf("id" to remoteId))
-    }
-
-    // --- Jukebox Mode ---
-
-    suspend fun jukeboxControl(
-        account: ServerAccount,
-        action: String,
-        songRemoteIds: List<String> = emptyList(),
-        index: Int? = null,
-        offsetSec: Int? = null,
-        gain: Float? = null,
-    ): JukeboxState {
-        val params = buildList {
-            add("action" to action)
-            songRemoteIds.forEach { add("id" to it) }
-            if (index != null) add("index" to index.toString())
-            if (offsetSec != null) add("offset" to offsetSec.toString())
-            if (gain != null) add("gain" to gain.coerceIn(0f, 1f).toString())
-        }
-        val sub = call(account, "jukeboxControl", params)
-        val playlist = sub.obj("jukeboxPlaylist")
-        val status = playlist ?: sub.obj("jukeboxStatus") ?: JsonObj()
-        return JukeboxState(
-            enabled = true,
-            active = true,
-            playing = status.bool("playing", false),
-            currentIndex = status.int("currentIndex", 0),
-            positionSec = status.int("position", 0),
-            gain = status.double("gain", 0.8).toFloat(),
-            entries = playlist?.arr("entry")?.objects().orEmpty().map { parseSongChild(account, it) },
-        )
     }
 
     // --- Library Scanning ---

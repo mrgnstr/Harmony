@@ -331,17 +331,6 @@ data class NowPlayingSession(
     val playbackRate: Double = 1.0,
 )
 
-/** Remote server audio output state from jukeboxControl. */
-data class JukeboxState(
-    val enabled: Boolean = false,
-    val active: Boolean = false,
-    val playing: Boolean = false,
-    val currentIndex: Int = 0,
-    val positionSec: Int = 0,
-    val gain: Float = 0.8f,
-    val entries: List<Song> = emptyList(),
-)
-
 /** Server library scanner status from getScanStatus or SSE scanStatus. */
 data class ScanStatusInfo(
     val scanning: Boolean = false,

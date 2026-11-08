@@ -20,7 +20,6 @@ import com.mrgnstr.harmony.core.model.AlbumExtraInfo
 import com.mrgnstr.harmony.core.model.ArtistExtraInfo
 import com.mrgnstr.harmony.core.model.AudioBookmark
 import com.mrgnstr.harmony.core.model.AuthMethod
-import com.mrgnstr.harmony.core.model.JukeboxState
 import com.mrgnstr.harmony.core.model.Lyrics
 import com.mrgnstr.harmony.core.model.MissingFileItem
 import com.mrgnstr.harmony.core.model.MusicFolder
@@ -104,8 +103,6 @@ class NavidromeRepository @Inject constructor(
     private val _musicFolders = MutableStateFlow<List<MusicFolder>>(emptyList())
     val musicFolders: StateFlow<List<MusicFolder>> = _musicFolders.asStateFlow()
 
-    private val _jukeboxState = MutableStateFlow(JukeboxState())
-    val jukeboxState: StateFlow<JukeboxState> = _jukeboxState.asStateFlow()
 
     val radios: Flow<List<RadioStation>> = navidromeDao.observeRadioStations()
         .map { list -> list.map { it.toModel() } }
@@ -819,52 +816,6 @@ class NavidromeRepository @Inject constructor(
         return if (similar.isNotEmpty()) listOf(song) + similar else listOf(song)
     }
 
-    // --- Bookmarks ---
-
-    fun observeBookmarkForSong(songId: Long): Flow<AudioBookmark?> =
-        navidromeDao.observeBookmarkForSong(songId).map { it?.toModel() }
-
-    suspend fun saveBookmark(song: Song, positionMs: Long, comment: String = "") {
-        val remoteId = song.remoteId ?: return
-        val account = accountFor(song.serverId) ?: return
-        val now = System.currentTimeMillis()
-        val bmk = AudioBookmark(
-            songId = song.id,
-            remoteSongId = remoteId,
-            songTitle = song.title,
-            artist = song.artist,
-            albumId = song.albumId,
-            positionMs = positionMs,
-            comment = comment,
-            createdMs = now,
-            changedMs = now,
-        )
-        navidromeDao.upsertBookmark(bmk.toEntity(account.id))
-        songDao.updateBookmarkPosition(song.id, positionMs)
-        val ok = runCatching { subsonic.createBookmark(account, remoteId, positionMs, comment); true }.getOrDefault(false)
-        if (!ok) {
-            enqueueMutation(
-                serverId = account.id,
-                type = PendingMutationEntity.TYPE_BOOKMARK_CREATE,
-                targetId = remoteId,
-                targetKind = "song",
-                payloadJson = buildJsonObj { put("positionMs", positionMs); put("comment", comment) }.toJsonString(),
-            )
-        }
-    }
-
-    suspend fun deleteBookmark(songId: Long) {
-        val song = songDao.getById(songId)
-        navidromeDao.deleteBookmark(songId)
-        songDao.updateBookmarkPosition(songId, 0L)
-        val remoteId = song?.remoteId ?: return
-        val account = accountFor(song.serverId) ?: return
-        val ok = runCatching { subsonic.deleteBookmark(account, remoteId); true }.getOrDefault(false)
-        if (!ok) {
-            enqueueMutation(account.id, PendingMutationEntity.TYPE_BOOKMARK_DELETE, remoteId, "song")
-        }
-    }
-
     // --- Playlists, Smart Playlists & M3U ---
 
     suspend fun createSmartPlaylist(
@@ -897,7 +848,7 @@ class NavidromeRepository @Inject constructor(
         return runCatching { nativeClient.exportM3uPlaylist(account, remoteId) }.getOrNull()
     }
 
-    // --- Shares, Radio & Jukebox ---
+    // --- Shares & Radio ---
 
     suspend fun getShares(): List<ShareLink> {
         val account = activeAccount.value ?: return emptyList()
@@ -942,20 +893,6 @@ class NavidromeRepository @Inject constructor(
         val account = accountFor(station.serverId) ?: return
         navidromeDao.deleteRadioStation(station.id)
         runCatching { subsonic.deleteInternetRadioStation(account, station.remoteId) }
-    }
-
-    suspend fun controlJukebox(action: String, songs: List<Song> = emptyList(), index: Int? = null, offsetSec: Int? = null, gain: Float? = null) {
-        val account = activeAccount.value ?: return
-        val remoteIds = songs.mapNotNull { it.remoteId }
-        runCatching {
-            val st = subsonic.jukeboxControl(account, action, remoteIds, index, offsetSec, gain)
-            _jukeboxState.value = st
-        }
-    }
-
-    suspend fun setJukeboxActive(active: Boolean) {
-        _jukeboxState.update { it.copy(active = active) }
-        if (active) controlJukebox("status")
     }
 
     // --- Admin & Maintenance ---
