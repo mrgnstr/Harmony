@@ -1146,9 +1146,11 @@ class SubsonicApiClient @Inject constructor(
     companion object {
         fun parseIsoTimeMs(iso: String?): Long {
             if (iso.isNullOrBlank()) return 0L
-            return runCatching { Instant.parse(iso).toEpochMilli() }.getOrElse {
-                iso.toLongOrNull() ?: 0L
-            }
+            // Navidrome writes the server's local offset ("2026-11-07T19:56:21.535236098+02:00"), which Instant.parse rejects:
+            // every date then fell back to 0 and "added" became the time of the sync.
+            return runCatching { java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
+                .recoverCatching { Instant.parse(iso).toEpochMilli() }
+                .getOrElse { iso.toLongOrNull() ?: 0L }
         }
 
         private fun formatItemDate(dateObj: JsonObj?): String? {

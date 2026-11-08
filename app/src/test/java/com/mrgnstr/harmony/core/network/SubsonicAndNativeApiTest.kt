@@ -341,4 +341,12 @@ class SubsonicAndNativeApiTest {
         assertEquals("desc", json.str("order"))
         assertEquals(50, json.int("limit"))
     }
+
+    @Test
+    fun isoTimesParseWithOffsetsAndZ() {
+        val expected = 1_794_074_181_535L // 2026-11-07T17:56:21.535Z
+        assertEquals(expected, SubsonicApiClient.parseIsoTimeMs("2026-11-07T19:56:21.535236098+02:00"))
+        assertEquals(expected, SubsonicApiClient.parseIsoTimeMs("2026-11-07T17:56:21.535Z"))
+        assertEquals(0L, SubsonicApiClient.parseIsoTimeMs("not a date"))
+    }
 }
