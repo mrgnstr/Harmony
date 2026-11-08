@@ -6,7 +6,7 @@ import javax.inject.Singleton
 
 /** What a queue was started from; picks the icon in the queue sheet. Stored by name, anything unknown reads as [Other]. */
 enum class QueueSourceKind {
-    Album, Artist, Playlist, Favourites, Radio, Other;
+    Album, Artist, Playlist, Favourites, Radio, Mix, Other;
 
     companion object {
         fun from(name: String?): QueueSourceKind = entries.firstOrNull { it.name == name } ?: Other

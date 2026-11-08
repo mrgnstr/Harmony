@@ -109,6 +109,7 @@ private fun QueueSourceKind.icon(): Symbol = when (this) {
     QueueSourceKind.Artist -> Symbols.Artist
     QueueSourceKind.Favourites -> Symbols.Favorite
     QueueSourceKind.Radio -> Symbols.Radio
+    QueueSourceKind.Mix -> Symbols.AutoAwesome
     QueueSourceKind.Playlist, QueueSourceKind.Other -> Symbols.QueueMusic
 }
 

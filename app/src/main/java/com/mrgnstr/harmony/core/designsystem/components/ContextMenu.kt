@@ -184,7 +184,7 @@ class MediaMenuViewModel @Inject constructor(
     fun startInstantMix(song: Song) {
         viewModelScope.launch {
             val mix = navidrome.instantMixForSong(song)
-            if (mix.isNotEmpty()) player.playQueue(mix, 0, source = "${song.title} Mix")
+            if (mix.isNotEmpty()) player.playQueue(mix, 0, source = "${song.title} Mix", kind = QueueSourceKind.Mix)
         }
     }
 
