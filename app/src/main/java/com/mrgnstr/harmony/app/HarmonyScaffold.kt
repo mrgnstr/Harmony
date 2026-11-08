@@ -5,6 +5,18 @@ import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.snapshotFlow
+import android.os.SystemClock
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.animateDp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.scene.Scene
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
@@ -297,12 +309,23 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
             }
         }
     }
+    // Whether a back gesture is in progress (its pages animate as going back before the pop itself happens).
+    val backProgress = rememberBackProgress()
+    val backGesture = remember { androidx.compose.runtime.derivedStateOf { backProgress.value != null } }
+    // When a swipe was last under way: a back that completes right after it is the swipe's, not the arrow's.
+    val lastGestureAt = remember { LongArray(1) }
+    LaunchedEffect(backProgress) { snapshotFlow { backProgress.value }.collect { if (it != null) lastGestureAt[0] = SystemClock.uptimeMillis() } }
     // Tab in the entry's identity and metadata (for the tab slide); the entry key is what pages claim colours under.
     val tabEntries = remember(entries) {
         { key: TabDestination ->
             val entry = entries(key.destination)
             NavEntry(key = key, contentKey = "${key.tab.name}:${entry.contentKey}", metadata = entry.metadata + (TabMetadata to key.tab)) {
-                CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, schemes, dark, tier.value) { entry.Content() } }
+                // Popped, or the top page while a back gesture holds it: the page that is going away backwards.
+                val leavingBack = key !in nav.stackOf(key.tab).map { TabDestination(key.tab, it) } || nav.stackOf(key.tab).lastOrNull() == key.destination
+                BackEffects(leavingBack, backing = nav.lastWasBack || backGesture.value, blurred = tier.value != VisualTier.LOW,
+                    ms = if (backGesture.value || nav.lastBackByGesture) GestureMs else BackMs) {
+                    CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, schemes, dark, tier.value) { entry.Content() } }
+                }
             }
         }
     }
@@ -336,7 +359,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                                         modifier = Modifier.fillMaxSize().clipToBounds().graphicsLayer {
                                             translationX = (tab.ordinal - position.value) * size.width
                                         },
-                                        onBack = { nav.pop() },
+                                        onBack = { nav.pop(byGesture = SystemClock.uptimeMillis() - lastGestureAt[0] < 600) },
                                         entryDecorators = listOf(
                                             rememberSaveableStateHolderNavEntryDecorator(),
                                             rememberViewModelStoreNavEntryDecorator(),
@@ -344,13 +367,15 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                                         sharedTransitionScope = this@SharedTransitionLayout,
                                         entryProvider = tabEntries,
                                         transitionSpec = { if (targetState.isCoverPage()) coverPushTransition() else pushTransition() },
-                                        popTransitionSpec = { if (initialState.isCoverPage()) coverPopTransition() else popTransition() },
-                                        predictivePopTransitionSpec = { predictivePopTransition() },
+                                        popTransitionSpec = { backTransition(gesture = false) },
+                                        predictivePopTransitionSpec = { backTransition(gesture = true) },
                                     )
                                 }
                             }
                         }
                     }
+                    // At a tab's root, back returns to the tab it was reached from; only at the first one does it leave the app.
+                    BackHandler(enabled = nav.canLeaveTab) { nav.backToPreviousTab() }
                     ChromeTheme(nav, schemes, dark, tier.value) {
                         AppBar(
                             current = nav.current,
@@ -405,19 +430,66 @@ private val CoverPageFade = tween<Float>(240, easing = LinearOutSlowInEasing)
 
 private fun coverPushTransition(): ContentTransform = ContentTransform(fadeIn(CoverPageFade, initialAlpha = 0f), ExitTransition.None)
 
-// The page going away stays on top of the one below it (which is already there) while it fades.
-private fun coverPopTransition(): ContentTransform = ContentTransform(EnterTransition.None, fadeOut(CoverPageFade), targetContentZIndex = -1f)
 
 private fun pushTransition(): ContentTransform =
     (slideInHorizontally(PageSlide) { it / 4 } + fadeIn(PageFade)) togetherWith (slideOutHorizontally(PageSlide) { -it / 6 } + fadeOut(PageFade))
 
-private fun popTransition(): ContentTransform =
-    (slideInHorizontally(PageSlide) { -it / 6 } + fadeIn(PageFade)) togetherWith (slideOutHorizontally(PageSlide) { it / 4 } + fadeOut(PageFade))
+/**
+ * Going back is one motion whether it comes from the gesture, the system's back key or the in-app arrow: the page shrinks and slides
+ * off to the right while the one below slides in from a short parallax offset. It ends fully off screen (a page that stops short
+ * simply vanishes when the transition ends), and its corners round while it leaves ([BackEffects]).
+ *
+ * Under a finger the animation is a seek and the spec is the curve of the gesture's progress, so the curves are shaped for it: the
+ * page shrinks and moves only a little over the drag ([BackDrag]), and letting go carries it the rest of the way out, along the same
+ * curve ([BackFlyOut]). The arrow, with no finger, uses a decelerating curve.
+ */
+private fun backTransition(gesture: Boolean): ContentTransform {
+    val ms = if (gesture) GestureMs else BackMs
+    val move = if (gesture) BackFlyOut else BackDecelerate
+    val shape = if (gesture) BackDrag else BackDecelerate
+    val enter = slideInHorizontally(tween(ms, easing = move)) { -it / 5 } + fadeIn(tween(ms, easing = shape), initialAlpha = 0.6f)
+    val exit = slideOutHorizontally(tween(ms, easing = move)) { it } + scaleOut(tween(ms, easing = shape), targetScale = BackScale)
+    // The page going away stays on top of the one below it.
+    return ContentTransform(enter, exit, targetContentZIndex = -1f)
+}
+
+/** Follows the finger to a third of the way over the first half of the gesture, then lets go quickly: fast out, soft end. */
+private val BackFlyOut = Easing { x -> if (x < 0.5f) 0.33f * (x / 0.5f) else 0.33f + 0.67f * (1f - (1f - (x - 0.5f) / 0.5f).let { it * it }) }
+
+/** Reaches its end over the first 40% of the gesture and holds (the shrink and the rounding settle while the finger is still down). */
+private val BackDrag = Easing { x -> (x / 0.4f).coerceAtMost(1f) }
+
+/** The arrow's curve: a clear start and a soft settle (a steeper one finished before the eye caught it). */
+private val BackDecelerate = FastOutSlowInEasing
+
+/** One duration for every part of the back motion, so the pieces stay in step (under a finger the parts are scaled onto one progress). */
+private const val BackMs = 480
+
+/** A swipe's motion is quicker: the part after letting go is what is left of this, so it must not drag. */
+private const val GestureMs = 300
+private const val BackScale = 0.9f
+private val BackCorner = 32.dp
+private val BackBlur = 24.dp
 
 /**
- * Back gesture: the page shrinks and slides away with the finger, staying opaque, while the one below slides in from its
- * parallax offset. The gesture drives the progress; no fades, since a linear cross-fade under a finger looks muddy.
+ * The back motion's effects on a page, driven by its own transition so the gesture's seek and the arrow's animation share them:
+ * the page leaving backwards rounds its corners ([leavingBack]: the one on top during the gesture, or one already popped), and the
+ * one coming back into view starts blurred and comes into focus as the other slides away ([backing]: a back is what brought it).
  */
-private fun predictivePopTransition(): ContentTransform =
-    slideInHorizontally(PageSlide) { -it / 6 } togetherWith
-        (slideOutHorizontally(PageSlide) { it / 3 } + scaleOut(PageFade, targetScale = 0.85f))
+@Composable
+private fun BackEffects(leavingBack: Boolean, backing: Boolean, blurred: Boolean, ms: Int, content: @Composable () -> Unit) {
+    val transition = LocalNavAnimatedContentScope.current.transition
+    val radius by transition.animateDp(
+        transitionSpec = { tween(if (targetState == EnterExitState.PostExit) ms else 0, easing = BackDrag) },
+        label = "back-corner",
+    ) { state -> if (state == EnterExitState.PostExit && leavingBack) BackCorner else 0.dp }
+    // Focus follows the whole motion (linear), so it is sharp as the other page finishes leaving.
+    val blur by transition.animateDp(
+        transitionSpec = { tween(if (initialState == EnterExitState.PreEnter) ms else 0, easing = LinearEasing) },
+        label = "back-blur",
+    ) { state -> if (state == EnterExitState.PreEnter && backing && blurred) BackBlur else 0.dp }
+    var modifier: Modifier = Modifier
+    if (radius > 0.dp) modifier = modifier.clip(RoundedCornerShape(radius))
+    if (blur > 0.dp) modifier = modifier.blur(blur)
+    Box(modifier) { content() }
+}

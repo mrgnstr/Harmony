@@ -43,7 +43,7 @@ sealed interface Dest {
 
 /** One back stack per tab; switching tabs keeps each stack alive. */
 @Stable
-class TabNavigator(initial: Map<Tab, List<Dest>> = emptyMap(), start: Tab = Tab.Home) {
+class TabNavigator(initial: Map<Tab, List<Dest>> = emptyMap(), start: Tab = Tab.Home, visited: List<Tab> = emptyList()) {
     var current by mutableStateOf(start)
         private set
 
@@ -52,19 +52,47 @@ class TabNavigator(initial: Map<Tab, List<Dest>> = emptyMap(), start: Tab = Tab.
 
     val backStack: SnapshotStateList<Dest> get() = stacks.getValue(current)
 
+    /** The tabs left behind, most recent last, each once: back at a tab's root returns to the last of them before it quits the app. */
+    private val history = mutableStateListOf<Tab>().apply { addAll(visited) }
+
+    /** Whether back at the current tab's root has a tab to go back to. */
+    val canLeaveTab: Boolean get() = backStack.size <= 1 && history.isNotEmpty()
+
+    /** Back at a root: returns to the tab before this one. @return false when there is none. */
+    fun backToPreviousTab(): Boolean {
+        val previous = history.lastOrNull() ?: return false
+        history.removeAt(history.lastIndex)
+        current = previous
+        return true
+    }
+
     fun stackOf(tab: Tab): SnapshotStateList<Dest> = stacks.getValue(tab)
 
     /** Selecting the current tab again goes back to its root. */
     fun select(tab: Tab) {
-        if (tab == current) backStack.retainAll(listOf(backStack.first())) else current = tab
+        lastWasBack = false
+        if (tab == current) backStack.retainAll(listOf(backStack.first())) else {
+            history.remove(tab)
+            history.remove(current)
+            history.add(current)
+            current = tab
+        }
     }
 
-    fun push(dest: Dest) = backStack.add(dest)
+    /** Whether the last move was a back (a pop or a tab returned to), which pages read to animate as going back. */
+    var lastWasBack by mutableStateOf(false)
+        private set
+    var lastBackByGesture by mutableStateOf(false)
+        private set
+
+    fun push(dest: Dest): Boolean { lastWasBack = false; return backStack.add(dest) }
 
     /** @return true if a screen was popped. */
-    fun pop(): Boolean = if (backStack.size > 1) { backStack.removeAt(backStack.lastIndex); true } else false
+    /** @param byGesture the back came from a swipe, whose motion is quicker than the arrow's. */
+    fun pop(byGesture: Boolean = false): Boolean =
+        if (backStack.size > 1) { lastWasBack = true; lastBackByGesture = byGesture; backStack.removeAt(backStack.lastIndex); true } else false
 
-    internal fun save(): List<Any> = listOf(current.name) + Tab.entries.map { tab -> stacks.getValue(tab).map(Dest::encode) }
+    internal fun save(): List<Any> = listOf(current.name) + Tab.entries.map { tab -> stacks.getValue(tab).map(Dest::encode) } + listOf(history.map { it.name })
 
     companion object {
         val Saver: Saver<TabNavigator, List<Any>> = Saver(
@@ -74,6 +102,7 @@ class TabNavigator(initial: Map<Tab, List<Dest>> = emptyMap(), start: Tab = Tab.
                 TabNavigator(
                     initial = Tab.entries.mapIndexed { i, tab -> tab to (saved[i + 1] as List<List<Any>>).mapNotNull(::decodeDest) }.toMap(),
                     start = Tab.valueOf(saved[0] as String),
+                    visited = runCatching { (saved.getOrNull(Tab.entries.size + 1) as? List<*>).orEmpty().map { Tab.valueOf(it as String) } }.getOrDefault(emptyList()),
                 )
             },
         )
