@@ -80,6 +80,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
@@ -106,6 +107,9 @@ private val MainSize = 30.sp
 private val MainLineHeight = 38.sp
 private val SubSize = 20.sp
 private val SubLineHeight = 26.sp
+/** Pronunciation set under each syllable of the main line: its size, and the room it takes under every visual line. */
+private val RubySize = SubSize
+private val RubyExtra = SubLineHeight
 private val TranslationSize = 17.sp
 private val TranslationLineHeight = 23.sp
 private val SideInset = 32.dp
@@ -624,12 +628,16 @@ private fun LineItem(
             .padding(horizontal = SideInset, vertical = LineInset),
         horizontalAlignment = if (line.duet) Alignment.End else Alignment.Start,
     ) {
+        // With timed pronunciation the syllables carry it under them (as in Apple Music); otherwise it is a line of its own.
+        val ruby = if (panel.showPronunciation && synced) remember(line, row.end) { rubyOf(line, row.end) } else null
         LyricText(
             text = line.text, cues = line.cues, litAmount = litAmount, play = play, pos = pos, lineEnd = row.end,
-            size = MainSize, lineHeight = MainLineHeight, align = align, dim = DimAlpha, litAlpha = 1f, glow = true,
+            size = MainSize, lineHeight = MainLineHeight, align = align, dim = DimAlpha, litAlpha = 1f, glow = true, ruby = ruby,
         )
-        if (panel.showPronunciation && !line.pronunciation.isNullOrBlank()) {
-            val cues = line.pronunciationCues.ifEmpty { listOf(LyricWordCue(row.start, row.end, text = line.pronunciation)) }
+        if (ruby == null && panel.showPronunciation && !line.pronunciation.isNullOrBlank()) {
+            // A line-by-line line (no syllable timing) lights as a whole, its pronunciation too: no sweep.
+            val cues = if (line.cues.isEmpty()) emptyList()
+            else line.pronunciationCues.ifEmpty { listOf(LyricWordCue(row.start, row.end, text = line.pronunciation)) }
             LyricText(
                 text = line.pronunciation, cues = if (synced) cues else emptyList(), litAmount = litAmount, play = play, pos = pos, lineEnd = row.end,
                 size = SubSize, lineHeight = SubLineHeight, align = align, dim = DimAlpha, litAlpha = 1f, glow = false,
@@ -725,6 +733,21 @@ private fun locate(text: String, cues: List<LyricWordCue>, lineEnd: Long): List<
         out += Located(a, b, cue.startMs, end, wordEnd = noSpaces || b >= text.length || text[b - 1].isWhitespace())
     }
     return out.takeIf { it.isNotEmpty() }
+}
+
+/**
+ * The pronunciation of each located cue of [line] (same order as [locate]), matched by time; null when the line has no timed
+ * pronunciation or its cues cannot be found in the text.
+ */
+private fun rubyOf(line: LyricLine, lineEnd: Long): List<String>? {
+    if (line.cues.isEmpty() || line.pronunciationCues.isEmpty()) return null
+    val located = locate(line.text, line.cues, lineEnd) ?: return null
+    val out = Array(located.size) { StringBuilder() }
+    for (pc in line.pronunciationCues) {
+        val k = located.indexOfLast { it.t0 <= pc.startMs + 30 }.coerceAtLeast(0)
+        out[k].append(pc.text)
+    }
+    return out.map { it.toString().trim() }.takeIf { r -> r.any { it.isNotEmpty() } }
 }
 
 /** A cue's slice of one visual line, in sweep space (mirrored for right-to-left text), with the share of the cue's time it gets. */
@@ -853,9 +876,16 @@ private fun LyricText(
     litAlpha: Float,
     glow: Boolean,
     modifier: Modifier = Modifier,
+    /** One pronunciation per located cue, drawn centred under its syllable in room added under every visual line. */
+    ruby: List<String>? = null,
 ) {
     val located = remember(text, cues, lineEnd) { locate(text, cues, lineEnd) }
-    val style = TextStyle(fontSize = size, lineHeight = lineHeight, fontWeight = FontWeight.Bold, textAlign = align)
+    val rubyOn = ruby != null && located != null && ruby.size == located.size
+    val style = TextStyle(
+        fontSize = size, fontWeight = FontWeight.Bold, textAlign = align,
+        lineHeight = if (rubyOn) (lineHeight.value + RubyExtra.value).sp else lineHeight,
+        lineHeightStyle = if (rubyOn) LineHeightStyle(LineHeightStyle.Alignment.Top, LineHeightStyle.Trim.None) else null,
+    )
     if (located == null) {
         Text(
             text, modifier.fillMaxWidth().graphicsLayer { alpha = lerp(dim, litAlpha, litAmount.value) },
@@ -871,6 +901,11 @@ private fun LyricText(
     val fade = with(density) { size.toPx() } * FadeEm
     val liftPx = with(density) { size.toPx() } * LiftEm
     val blurs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val measurer = rememberTextMeasurer()
+    val rubyStyle = TextStyle(fontSize = RubySize, fontWeight = FontWeight.Bold)
+    val rubyLayouts = remember(ruby, rubyOn, density) {
+        if (rubyOn) ruby!!.map { if (it.isEmpty()) null else measurer.measure(it, rubyStyle) } else emptyList()
+    }
     Text(
         text,
         modifier
@@ -879,11 +914,27 @@ private fun LyricText(
                 val g = geo
                 val l = layout
                 val amount = litAmount.value
+                // The pronunciations sit still under their syllables: dim, with the line's sweep lit over them.
+                fun drawRuby(lit: Boolean, t: Long) {
+                    if (g == null || g.rtl) return
+                    for ((wi, w) in g.words.withIndex()) {
+                        val r = rubyLayouts.getOrNull(wi) ?: continue
+                        val (vl, p) = w.pieces[0]
+                        // Flush with the start of its syllable (its end, for the right-aligned second voice).
+                        val x = (if (align == TextAlign.End) p.realR - r.size.width else p.realL).coerceIn(0f, max(0f, g.width - r.size.width))
+                        val at = Offset(x, vl.bottom - RubyExtra.toPx())
+                        if (!lit) drawText(r, Color.White, topLeft = at, alpha = dim)
+                        // The brush is in the text's own coordinates, so the sweep's edge is moved into them.
+                        else drawText(r, sweepBrush(edgeOf(vl, t, fade) - at.x, fade, false, g.width), topLeft = at, alpha = litAlpha * amount)
+                    }
+                }
                 if (g == null || l == null || amount <= 0.001f) {
+                    drawRuby(false, 0L)
                     drawContent()
                     return@drawWithContent
                 }
                 val t = pos.value
+                if (rubyOn) { drawRuby(false, t); drawRuby(true, t) }
                 // While the line is lit the syllables that can glow are drawn on their own (also at rest, so nothing shifts when one starts).
                 val own = if (!glow || g.rtl) emptyList() else g.words.indices.filter { g.words[it].glows }
                 val holes = own.map { val (vl, p) = g.words[it].pieces[0]; Rect(p.realL, vl.top, p.realR, vl.bottom) }
