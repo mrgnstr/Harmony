@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -481,14 +482,17 @@ fun SongContextMenu(
                 onClick = { onDismiss(); openArtist(song.artist) },
             )
         }
-        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        StarRatingRow(
-            rating = localRating,
-            onRatingChange = { r ->
-                localRating = r
-                viewModel.setSongRating(song, r)
-            },
-        )
+        // Ratings are a Navidrome feature: local songs have none.
+        if (song.isRemote) {
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            StarRatingRow(
+                rating = localRating,
+                onRatingChange = { r ->
+                    localRating = r
+                    viewModel.setSongRating(song, r)
+                },
+            )
+        }
     }
 
     playlistFor?.let { songs ->
@@ -579,14 +583,16 @@ fun AlbumContextMenu(
                 onClick = { onDismiss(); openArtist(album.artist) },
             )
         }
-        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        StarRatingRow(
-            rating = localRating,
-            onRatingChange = { r ->
-                localRating = r
-                viewModel.setAlbumRating(album, r)
-            },
-        )
+        if (album.id < 0L) {
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            StarRatingRow(
+                rating = localRating,
+                onRatingChange = { r ->
+                    localRating = r
+                    viewModel.setAlbumRating(album, r)
+                },
+            )
+        }
     }
 
     playlistFor?.let { songs ->
@@ -618,7 +624,9 @@ fun ArtistContextMenu(
 ) {
     val favArtists by viewModel.favouriteArtists.collectAsStateWithLifecycle()
     val favourite = artistName in favArtists
-    var localRating by remember(artistName) { mutableIntStateOf(0) }
+    // Null until known, and for an artist that is not on a server (ratings are a Navidrome feature).
+    val remoteRating by produceState<Int?>(null, artistName) { value = viewModel.navidrome.remoteArtistRating(artistName) }
+    var localRating by remember(artistName) { mutableStateOf<Int?>(null) }
 
     CenteredDropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         DropdownMenuItem(
@@ -636,13 +644,15 @@ fun ArtistContextMenu(
             leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
             onClick = { onDismiss(); viewModel.toggleFavouriteArtist(artistName) },
         )
-        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        StarRatingRow(
-            rating = localRating,
-            onRatingChange = { r ->
-                localRating = r
-                viewModel.setArtistRating(artistName, r)
-            },
-        )
+        if (remoteRating != null) {
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            StarRatingRow(
+                rating = localRating ?: remoteRating ?: 0,
+                onRatingChange = { r ->
+                    localRating = r
+                    viewModel.setArtistRating(artistName, r)
+                },
+            )
+        }
     }
 }

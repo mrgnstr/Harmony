@@ -946,6 +946,9 @@ class NavidromeRepository @Inject constructor(
     private suspend fun accountFor(serverId: Long): ServerAccount? =
         if (serverId > 0L) navidromeDao.accountById(serverId)?.toModel() ?: activeAccount.value
         else activeAccount.value ?: navidromeDao.activeAccount()?.toModel()
+    /** The artist's rating on the server, or null for an artist that is not on one (ratings are a Navidrome feature). */
+    suspend fun remoteArtistRating(artistName: String): Int? = navidromeDao.artistExtraByName(artistName)?.userRating
+
 
     private companion object {
         const val TAG = "NavidromeRepo"
