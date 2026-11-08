@@ -75,7 +75,9 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -110,6 +112,11 @@ private val SubLineHeight = 26.sp
 /** Pronunciation set under each syllable of the main line: its size, and the room it takes under every visual line. */
 private val RubySize = SubSize
 private val RubyExtra = SubLineHeight
+/** The same for the backing vocal (its own text is [SubSize]). */
+private val BgRubySize = 14.sp
+private val BgRubyExtra = 18.sp
+/** The least room between two pronunciations. */
+private val RubyGap = 4.dp
 private val TranslationSize = 17.sp
 private val TranslationLineHeight = 23.sp
 private val SideInset = 32.dp
@@ -667,10 +674,11 @@ private fun LineItem(
                     .graphicsLayer { alpha = open.value },
             ) {
                 val cues = bg.cues.ifEmpty { listOf(LyricWordCue(bg.startMs, bg.endMs ?: row.end, text = bg.text)) }
+                val bgRuby = if (panel.showPronunciation) remember(bg, row.end) { rubyOf(bg, bg.endMs ?: row.end) } else null
                 LyricText(
                     text = bg.text, cues = cues, litAmount = litAmount, play = play, pos = pos, lineEnd = bg.endMs ?: row.end,
                     size = SubSize, lineHeight = SubLineHeight, align = align, dim = BackgroundDim, litAlpha = BackgroundLit, glow = false,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 4.dp), ruby = bgRuby, rubySize = BgRubySize, rubyExtra = BgRubyExtra,
                 )
             }
         }
@@ -748,6 +756,27 @@ private fun rubyOf(line: LyricLine, lineEnd: Long): List<String>? {
         out[k].append(pc.text)
     }
     return out.map { it.toString().trim() }.takeIf { r -> r.any { it.isNotEmpty() } }
+}
+
+private const val WordJoiner = '\u2060'
+
+/** [text] with a word joiner between the characters of each cue in [located] (not next to a space), and [located] moved to match. */
+private fun joinCues(text: String, located: List<Located>): Pair<String, List<Located>> {
+    val sb = StringBuilder()
+    var cursor = 0
+    val moved = ArrayList<Located>(located.size)
+    for (loc in located) {
+        sb.append(text, cursor, loc.a)
+        val a = sb.length
+        for (i in loc.a until loc.b) {
+            sb.append(text[i])
+            if (i < loc.b - 1 && !text[i].isWhitespace() && !text[i + 1].isWhitespace()) sb.append(WordJoiner)
+        }
+        moved += Located(a, sb.length, loc.t0, loc.t1, loc.wordEnd)
+        cursor = loc.b
+    }
+    sb.append(text, cursor, text.length)
+    return sb.toString() to moved
 }
 
 /** A cue's slice of one visual line, in sweep space (mirrored for right-to-left text), with the share of the cue's time it gets. */
@@ -878,12 +907,14 @@ private fun LyricText(
     modifier: Modifier = Modifier,
     /** One pronunciation per located cue, drawn centred under its syllable in room added under every visual line. */
     ruby: List<String>? = null,
+    rubySize: TextUnit = RubySize,
+    rubyExtra: TextUnit = RubyExtra,
 ) {
     val located = remember(text, cues, lineEnd) { locate(text, cues, lineEnd) }
     val rubyOn = ruby != null && located != null && ruby.size == located.size
     val style = TextStyle(
         fontSize = size, fontWeight = FontWeight.Bold, textAlign = align,
-        lineHeight = if (rubyOn) (lineHeight.value + RubyExtra.value).sp else lineHeight,
+        lineHeight = if (rubyOn) (lineHeight.value + rubyExtra.value).sp else lineHeight,
         lineHeightStyle = if (rubyOn) LineHeightStyle(LineHeightStyle.Alignment.Top, LineHeightStyle.Trim.None) else null,
     )
     if (located == null) {
@@ -893,8 +924,11 @@ private fun LyricText(
         )
         return
     }
-    var layout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
-    val geo = remember(layout, located) { layout?.let { buildGeo(it, text, located) } }
+    // With pronunciations a syllable must not be split over two lines (its pronunciation could not follow it): word joiners keep
+    // its characters together, and [placed] is [located] in the joined text.
+    val (shown, placed) = remember(text, located, rubyOn) { if (rubyOn) joinCues(text, located) else text to located }
+    var layout by remember(shown) { mutableStateOf<TextLayoutResult?>(null) }
+    val geo = remember(layout, placed) { layout?.let { buildGeo(it, shown, placed) } }
     // The ones that glow at the same time need a layer each.
     val glowLayers = if (glow) listOf(rememberGraphicsLayer(), rememberGraphicsLayer()) else emptyList()
     val density = LocalDensity.current
@@ -902,12 +936,29 @@ private fun LyricText(
     val liftPx = with(density) { size.toPx() } * LiftEm
     val blurs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val measurer = rememberTextMeasurer()
-    val rubyStyle = TextStyle(fontSize = RubySize, fontWeight = FontWeight.Bold)
+    val rubyStyle = TextStyle(fontSize = rubySize, fontWeight = FontWeight.Bold)
     val rubyLayouts = remember(ruby, rubyOn, density) {
         if (rubyOn) ruby!!.map { if (it.isEmpty()) null else measurer.measure(it, rubyStyle) } else emptyList()
     }
+    // A syllable narrower than its pronunciation is followed by the missing width (as letter spacing on its last char), so the
+    // pronunciations never run into each other.
+    val display = remember(shown, placed, rubyLayouts, style, density) {
+        if (!rubyOn) AnnotatedString(shown)
+        else {
+            val plain = measurer.measure(shown, style, softWrap = false)
+            val gap = with(density) { RubyGap.toPx() }
+            val b = AnnotatedString.Builder(shown)
+            for ((i, loc) in placed.withIndex()) {
+                val r = rubyLayouts.getOrNull(i) ?: continue
+                val w = plain.getBoundingBox(loc.b - 1).right - plain.getBoundingBox(loc.a).left
+                val extra = r.size.width + gap - w
+                if (extra > 0.5f) b.addStyle(SpanStyle(letterSpacing = with(density) { extra.toSp() }), loc.b - 1, loc.b)
+            }
+            b.toAnnotatedString()
+        }
+    }
     Text(
-        text,
+        display,
         modifier
             .fillMaxWidth()
             .drawWithContent {
@@ -922,10 +973,15 @@ private fun LyricText(
                         val (vl, p) = w.pieces[0]
                         // Flush with the start of its syllable (its end, for the right-aligned second voice).
                         val x = (if (align == TextAlign.End) p.realR - r.size.width else p.realL).coerceIn(0f, max(0f, g.width - r.size.width))
-                        val at = Offset(x, vl.bottom - RubyExtra.toPx())
+                        val at = Offset(x, vl.bottom - rubyExtra.toPx())
                         if (!lit) drawText(r, Color.White, topLeft = at, alpha = dim)
-                        // The brush is in the text's own coordinates, so the sweep's edge is moved into them.
-                        else drawText(r, sweepBrush(edgeOf(vl, t, fade) - at.x, fade, false, g.width), topLeft = at, alpha = litAlpha * amount)
+                        else {
+                            // Its own sweep, over the time its syllable is sung and over its own width (it can be wider than the
+                            // syllable); the brush is in the text's own coordinates.
+                            val pr = ((t - w.t0).toFloat() / (w.t1 - w.t0).coerceAtLeast(1L)).coerceIn(0f, 1f)
+                            val edge = r.size.width * pr + fade * (EdgeLead + (1f - EdgeLead) * pr) * (if (t > w.t0) 1f else 0f)
+                            drawText(r, sweepBrush(edge, fade, false, r.size.width.toFloat()), topLeft = at, alpha = litAlpha * amount)
+                        }
                     }
                 }
                 if (g == null || l == null || amount <= 0.001f) {

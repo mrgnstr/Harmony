@@ -151,7 +151,7 @@ class SubsonicAndNativeApiTest {
                     "offset":100,
                     "agents":[{"id":"v1","role":"main","name":"Lead"},{"id":"v2","role":"bg","name":"Duet"}],
                     "line":[
-                        {"start":1100,"value":"Hello world"},
+                        {"start":1100,"value":"Hello 世界"},
                         {"start":3100,"value":"Second line"}
                     ],
                     "cueLine":[
@@ -159,11 +159,11 @@ class SubsonicAndNativeApiTest {
                             "index":0,
                             "start":1100,
                             "end":2500,
-                            "value":"Hello world",
+                            "value":"Hello 世界",
                             "agentId":"v1",
                             "cue":[
                                 {"start":1100,"end":1600,"byteStart":0,"byteEnd":4,"value":"Hello"},
-                                {"start":1600,"end":2500,"byteStart":6,"byteEnd":10,"value":"world"}
+                                {"start":1600,"end":2500,"byteStart":6,"byteEnd":10,"value":"世界"}
                             ]
                         }
                     ]
@@ -208,7 +208,7 @@ class SubsonicAndNativeApiTest {
         assertEquals(2, first.cues.size)
         assertEquals("Hello", first.cues[0].text)
         assertEquals(1000L, first.cues[0].startMs)
-        assertEquals("world", first.cues[1].text)
+        assertEquals("世界", first.cues[1].text)
     }
 
     @Test
@@ -217,15 +217,15 @@ class SubsonicAndNativeApiTest {
             """[
                 {"lang":"jpn","kind":"main","synced":true,
                  "agents":[{"id":"v1","role":"main"},{"id":"v2","role":"voice"},{"id":"b1","role":"bg"}],
-                 "line":[{"start":1000,"value":"Hello ü"},{"start":4000,"value":"Reply"},{"start":6000,"value":"Both"}],
+                 "line":[{"start":1000,"value":"Hello 世"},{"start":4000,"value":"返事"},{"start":6000,"value":"Both"}],
                  "cueLine":[
-                    {"index":0,"agentId":"v1","start":1000,"end":2000,"value":"Hello ü","cue":[
+                    {"index":0,"agentId":"v1","start":1000,"end":2000,"value":"Hello 世","cue":[
                         {"start":1000,"end":1500,"byteStart":0,"byteEnd":5,"value":"Hello "},
-                        {"start":1500,"end":2000,"byteStart":6,"byteEnd":7,"value":"ü"}]},
+                        {"start":1500,"end":2000,"byteStart":6,"byteEnd":7,"value":"世"}]},
                     {"index":0,"agentId":"b1","start":1400,"end":2200,"value":"(ooh)","cue":[
                         {"start":1400,"end":2200,"byteStart":1,"byteEnd":3,"value":"ooh"}]},
-                    {"index":1,"agentId":"v2","start":4000,"end":5000,"value":"Reply","cue":[
-                        {"start":4000,"end":5000,"byteStart":0,"byteEnd":4,"value":"Reply"}]},
+                    {"index":1,"agentId":"v2","start":4000,"end":5000,"value":"返事","cue":[
+                        {"start":4000,"end":5000,"byteStart":0,"byteEnd":4,"value":"返事"}]},
                     {"index":2,"agentId":"v1","start":6000,"end":7000,"value":"Both"},
                     {"index":2,"agentId":"v2","start":6200,"end":7000,"value":"Both"}
                  ]},
@@ -238,10 +238,10 @@ class SubsonicAndNativeApiTest {
         ).objects()
         val l = subsonic.parseStructuredLyrics(json)!!
         // line 2 has a second voice beside the main one: it follows as its own duet line.
-        assertEquals(listOf("Hello ü", "Reply", "Both", "Both"), l.lines.map { it.text })
+        assertEquals(listOf("Hello 世", "返事", "Both", "Both"), l.lines.map { it.text })
         val a = l.lines[0]
         assertFalse(a.duet)
-        assertEquals(listOf("Hello ", "ü"), a.cues.map { it.text })
+        assertEquals(listOf("Hello ", "世"), a.cues.map { it.text })
         assertEquals("ooh", a.background!!.text)
         assertEquals(listOf("ooh"), a.background!!.cues.map { it.text })
         assertEquals(1400L, a.background!!.startMs)

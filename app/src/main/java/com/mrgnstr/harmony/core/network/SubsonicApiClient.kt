@@ -685,7 +685,9 @@ class SubsonicApiClient @Inject constructor(
             val startMs = if (synced && startRaw != null) (startRaw - offsetMs).coerceAtLeast(0L) else -1L
             val text = lineObj.str("value")
             val translation = if (transByIndex) transLines.getOrNull(idx)?.str("value") else if (synced && startMs >= 0) byStart(transLines, startMs) else null
-            val pronCl = pronCueLines[idx]?.firstOrNull()
+            val isBgCl = { cl: JsonObj -> cl.strOrNull("agentId")?.let { roles[it] == "bg" || it.contains("bg", ignoreCase = true) } == true }
+            val pronCl = pronCueLines[idx]?.firstOrNull { !isBgCl(it) }
+            val pronBgCl = pronCueLines[idx]?.firstOrNull(isBgCl)
             val pronunciation = (if (pronByIndex) pronLines.getOrNull(idx)?.str("value") else if (synced && startMs >= 0) byStart(pronLines, startMs) else null)
                 ?: pronCl?.strOrNull("value")
             val pronunciationCues = pronCl?.let { cuesOf(it, offsetMs, null) }.orEmpty()
@@ -710,6 +712,11 @@ class SubsonicApiClient @Inject constructor(
             val agentId = primary.strOrNull("agentId")
             val duet = primary !== mainLayer
             val background = bgLayer?.let { stripParens(cueLineToLine(it, offsetMs, startMs, "", synced, agentId, duet)) }?.takeIf { it.text.isNotEmpty() }
+                ?.let { b ->
+                    // The backing vocal's pronunciation comes as a parallel cueLine of its own.
+                    val pb = pronBgCl?.let { stripParens(cueLineToLine(it, offsetMs, startMs, "", synced, null, duet)) }?.takeIf { it.text.isNotEmpty() }
+                    if (pb == null) b else b.copy(pronunciation = pb.text, pronunciationCues = pb.cues)
+                }
             val line = cueLineToLine(primary, offsetMs, startMs, text, synced, agentId, duet)
             anyWordCues = anyWordCues || line.cues.isNotEmpty() || background?.cues?.isNotEmpty() == true
             builtLines += line.copy(
@@ -733,7 +740,7 @@ class SubsonicApiClient @Inject constructor(
             hasTranslations = transLines.isNotEmpty(),
             hasPronunciations = pronLines.isNotEmpty() || pronCueLines.isNotEmpty(),
             hasWordCues = anyWordCues,
-        )
+        ).withoutRedundantPronunciations()
     }
 
     private fun cueLineToLine(cl: JsonObj, offsetMs: Long, fallbackStart: Long, fallbackText: String, synced: Boolean, agentId: String?, duet: Boolean): LyricLine {
@@ -770,7 +777,11 @@ class SubsonicApiClient @Inject constructor(
         cues[0] = cues[0].copy(text = cues[0].text.removePrefix("("))
         cues[cues.lastIndex] = cues.last().let { it.copy(text = it.text.trimEnd().removeSuffix(")")) }
         cues.removeAll { it.text.isEmpty() }
-        return l.copy(text = cues.joinToString("") { it.text }.trim(), cues = cues)
+        val joined = cues.joinToString("") { it.text }.trim()
+        // The cue slices can leave out the spaces between words ("(Hey" "uh)"); the line's own value has them.
+        val own = l.text.trim().removePrefix("(").removeSuffix(")").trim()
+        val text = if (own.filterNot { it.isWhitespace() } == joined.filterNot { it.isWhitespace() }) own else joined
+        return l.copy(text = text, cues = cues)
     }
 
     // --- Transcoding & Streaming ---

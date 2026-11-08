@@ -52,6 +52,19 @@ data class Lyrics(
     val hasPronunciations: Boolean = false,
     val hasWordCues: Boolean = false,
 ) {
+    /**
+     * These lyrics without pronunciations that say nothing: on a line with no letters outside the Latin script (and none that
+     * is the pronunciation itself), a pronunciation only repeats the line. [hasPronunciations] follows what is left.
+     */
+    fun withoutRedundantPronunciations(): Lyrics {
+        if (!hasPronunciations) return this
+        fun LyricLine.pruned(): LyricLine =
+            if (pronunciation == null || text.any { it.isLetter() && Character.UnicodeScript.of(it.code) != Character.UnicodeScript.LATIN }) this
+            else copy(pronunciation = null, pronunciationCues = emptyList())
+        val kept = lines.map { l -> l.pruned().let { p -> p.copy(background = p.background?.pruned()) } }
+        return copy(lines = kept, hasPronunciations = kept.any { it.pronunciation != null || it.background?.pronunciation != null })
+    }
+
     /** The line playing at [positionMs]: the last one started, -1 before the first (and always in unsynced lyrics). */
     fun activeIndex(positionMs: Long): Int {
         if (!synced) return -1

@@ -97,7 +97,7 @@ object TtmlParser {
             hasTranslations = sorted.any { it.translation != null },
             hasPronunciations = sorted.any { it.pronunciation != null },
             hasWordCues = sorted.any { it.cues.isNotEmpty() || it.background?.cues?.isNotEmpty() == true },
-        )
+        ).withoutRedundantPronunciations()
     }
 
     private fun background(span: Node, pStart: Long?, agentId: String?, duet: Boolean): LyricLine? {

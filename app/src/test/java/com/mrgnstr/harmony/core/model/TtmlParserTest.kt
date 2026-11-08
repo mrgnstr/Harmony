@@ -29,10 +29,10 @@ class TtmlParserTest {
   </head>
   <body dur="0:09.000">
     <div begin="0:01.000" end="0:09.000" itunes:songPart="Verse">
-      <p begin="0:01.000" end="0:02.500" itunes:key="L1" ttm:agent="v1"><span begin="0:01.000" end="0:01.500">Hel</span><span begin="0:01.500" end="0:02.000">lo</span> <span begin="0:02.000" end="0:02.500">world</span><span ttm:role="x-bg"><span begin="0:01.800" end="0:02.300">(ooh</span> <span begin="0:02.300" end="0:02.600">yeah)</span></span></p>
+      <p begin="0:01.000" end="0:02.500" itunes:key="L1" ttm:agent="v1"><span begin="0:01.000" end="0:01.500">Hel</span><span begin="0:01.500" end="0:02.000">lo</span> <span begin="0:02.000" end="0:02.500">世界</span><span ttm:role="x-bg"><span begin="0:01.800" end="0:02.300">(ooh</span> <span begin="0:02.300" end="0:02.600">yeah)</span></span></p>
       <p begin="0:03.000" end="0:04.000" itunes:key="L2" ttm:agent="v2">
         <span ttm:role="x-bg"><span begin="0:03.200" end="0:03.600">(back)</span></span>
-        <span begin="0:03.000" end="0:03.500">Second</span>
+        <span begin="0:03.000" end="0:03.500">二番目</span>
         <span begin="0:03.500" end="0:04.000">line</span>
         <span ttm:role="x-translation" xml:lang="en">Second line (inline)</span>
         <span ttm:role="x-roman">daini gyo</span>
@@ -55,8 +55,8 @@ class TtmlParserTest {
         assertEquals(3, l.lines.size)
 
         val a = l.lines[0]
-        assertEquals("Hello world", a.text)
-        assertEquals(listOf("Hel", "lo ", "world"), a.cues.map { it.text })
+        assertEquals("Hello 世界", a.text)
+        assertEquals(listOf("Hel", "lo ", "世界"), a.cues.map { it.text })
         assertEquals(1_000L, a.startMs)
         assertEquals(2_500L, a.endMs)
         assertFalse(a.duet)
@@ -70,7 +70,7 @@ class TtmlParserTest {
         val b = l.lines[1]
         assertTrue(b.duet)
         assertEquals("v2", b.agentId)
-        assertEquals("Second line", b.text)
+        assertEquals("二番目 line", b.text)
         assertEquals("Second line (inline)", b.translation)
         assertEquals("daini gyo", b.pronunciation)
         assertTrue(b.pronunciationCues.isEmpty())
