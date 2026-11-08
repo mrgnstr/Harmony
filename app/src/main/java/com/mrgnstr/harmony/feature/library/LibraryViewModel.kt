@@ -3,7 +3,6 @@ package com.mrgnstr.harmony.feature.library
 import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mrgnstr.harmony.core.data.ArtistImageStore
 import com.mrgnstr.harmony.core.data.HistoryRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
 import com.mrgnstr.harmony.core.data.NavidromeRepository
@@ -73,7 +72,6 @@ private fun <T> Comparator<T>.direction(ascending: Boolean) = if (ascending) thi
 class LibraryViewModel @Inject constructor(
     private val library: LibraryRepository,
     history: HistoryRepository,
-    imageStore: ArtistImageStore,
     private val playlistRepository: PlaylistRepository,
     val navidrome: NavidromeRepository,
     private val settings: SettingsStore,
@@ -160,16 +158,10 @@ class LibraryViewModel @Inject constructor(
         songs.sortedWith(order.direction(sort.ascending))
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Each artist is pictured with the same release as the hero of their page, or with their own image.
+    // The artists come pictured (own photo, server picture or the page's hero release) from the repository.
     val artists: StateFlow<List<Artist>> = combine(
-        library.artists, library.albums, library.artistIndex, imageStore.images, combine(stats, sortOf(LibraryTab.Artists)) { s, o -> s to o },
-    ) { artists, albums, index, images, (stats, sort) ->
-        val releases = HashMap<String, MutableList<Album>>()
-        for (album in albums) for (name in index.artistsOf(album.artist)) releases.getOrPut(name.lowercase()) { ArrayList() } += album
-        val shown = artists.map { artist ->
-            val withCover = releases[artist.name.lowercase()]?.let(::heroOf)?.let { artist.copy(artAlbumId = it.id, artSongId = it.artSongId) } ?: artist
-            withCover.copy(imagePath = images[artist.name]?.path)
-        }
+        library.artists, combine(stats, sortOf(LibraryTab.Artists)) { s, o -> s to o },
+    ) { shown, (stats, sort) ->
         fun plays(a: Artist) = stats.artists[a.name.lowercase()]
         val order: Comparator<Artist> = when (sort.key) {
             SortKey.RecentlyPlayed -> compareBy<Artist> { plays(it)?.lastPlayedMs ?: 0L }.thenBy(ci) { it.name }

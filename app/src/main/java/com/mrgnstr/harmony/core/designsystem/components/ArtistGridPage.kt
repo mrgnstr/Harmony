@@ -14,7 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.mrgnstr.harmony.core.designsystem.ArtworkImage
+import com.mrgnstr.harmony.core.designsystem.ArtistPicture
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.model.Artist
@@ -24,7 +24,7 @@ import java.io.File
 val ArtistShelfTileWidth = 120.dp
 
 /** One tile of an artist shelf or grid. [artist] is the library entry when there is one (photo or cover, menu); remote-only artists have none. */
-data class ArtistShelfItem(val name: String, val subtitle: String? = null, val artist: Artist? = null)
+data class ArtistShelfItem(val name: String, val subtitle: String? = null, val artist: Artist? = null, val imageUrl: String? = null)
 
 /** A circular artist tile: the library artist's photo or cover with its menu, or a plain icon for an artist the library does not have. */
 @Composable
@@ -38,10 +38,9 @@ fun ArtistShelfTile(item: ArtistShelfItem, onClick: () -> Unit, modifier: androi
         onLongClick = if (artist != null) ({ menuInitialized = true; menuOpen = true }) else null,
         menu = { if (menuInitialized) ArtistContextMenu(item.name, menuOpen, { menuOpen = false }) },
     ) { cover ->
-        val custom = artist?.imagePath
         when {
-            custom != null -> AsyncImage(File(custom), null, cover, contentScale = ContentScale.Crop)
-            artist != null -> ArtworkImage(artist.artSongId, artist.artAlbumId, cover)
+            artist != null -> ArtistPicture(artist, cover)
+            item.imageUrl != null -> AsyncImage(item.imageUrl, null, cover, contentScale = ContentScale.Crop)
             else -> Box(cover.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                 SymbolIcon(Symbols.Artist, null, size = 36.dp, tint = MaterialTheme.colorScheme.onSecondaryContainer)
             }

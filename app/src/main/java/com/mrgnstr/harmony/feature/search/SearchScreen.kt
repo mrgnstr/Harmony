@@ -90,6 +90,7 @@ import com.mrgnstr.harmony.core.data.SearchRepository
 import com.mrgnstr.harmony.core.data.SearchResults
 import com.mrgnstr.harmony.core.database.AlbumKey
 import com.mrgnstr.harmony.core.database.RecentSearchEntity
+import com.mrgnstr.harmony.core.designsystem.ArtistPicture
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalOpenAlbum
@@ -805,12 +806,7 @@ private fun TopResultCard(
             onCardClick = { onOpenArtist(artist) }
             onPlayClick = { onPlayArtist(artist) }
             artwork = {
-                val image = artist.imagePath
-                if (image != null) {
-                    AsyncImage(File(image), null, Modifier.size(80.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                } else {
-                    ArtworkImage(artist.artSongId, artist.artAlbumId, Modifier.size(80.dp).clip(CircleShape))
-                }
+                ArtistPicture(artist, Modifier.size(80.dp).clip(CircleShape))
             }
             menuContent = {
                 if (menuInitialized) {
@@ -997,12 +993,7 @@ private fun SearchArtistRow(
         modifier = modifier,
         onLongClick = openMenu,
         leading = {
-            val image = artist.imagePath
-            if (image != null) {
-                AsyncImage(File(image), null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-            } else {
-                ArtworkImage(artist.artSongId, artist.artAlbumId, Modifier.size(56.dp).clip(CircleShape))
-            }
+            ArtistPicture(artist, Modifier.size(56.dp).clip(CircleShape))
         },
         trailing = {
             IconButton(onClick = openMenu) {

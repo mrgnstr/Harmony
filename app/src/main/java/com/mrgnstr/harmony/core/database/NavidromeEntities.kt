@@ -228,6 +228,7 @@ fun ArtistExtraInfo.toEntity(): RemoteArtistEntity = RemoteArtistEntity(
                 put("name", s.name)
                 put("coverArtId", s.coverArtId)
                 put("albumCount", s.albumCount)
+                put("imageUrl", s.imageUrl)
             }
         },
     ).toJsonString(),
@@ -249,7 +250,7 @@ fun RemoteArtistEntity.toModel(): ArtistExtraInfo = ArtistExtraInfo(
     roles = runCatching { MiniJson.parseArray(rolesJson).strings() }.getOrDefault(emptyList()),
     similarArtists = runCatching {
         MiniJson.parseArray(similarArtistsJson).objects().map {
-            SimilarArtistRef(it.str("id"), it.str("name"), it.strOrNull("coverArtId"), it.int("albumCount"))
+            SimilarArtistRef(it.str("id"), it.str("name"), it.strOrNull("coverArtId"), it.int("albumCount"), it.strOrNull("imageUrl"))
         }
     }.getOrDefault(emptyList()),
     userRating = userRating,

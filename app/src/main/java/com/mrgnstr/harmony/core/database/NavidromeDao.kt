@@ -69,6 +69,9 @@ interface NavidromeDao {
     @Query("SELECT * FROM remote_artists")
     suspend fun allArtistExtras(): List<RemoteArtistEntity>
 
+    @Query("SELECT name, coverArtId FROM remote_artists WHERE coverArtId IS NOT NULL")
+    fun observeArtistCovers(): Flow<List<ArtistCoverRow>>
+
     @Upsert
     suspend fun upsertArtistExtras(items: List<RemoteArtistEntity>)
 
@@ -123,3 +126,6 @@ interface NavidromeDao {
     @Query("DELETE FROM pending_mutations WHERE serverId = :serverId")
     suspend fun deleteMutationsByServer(serverId: Long)
 }
+
+/** An artist's name with its server picture id. */
+data class ArtistCoverRow(val name: String, val coverArtId: String)

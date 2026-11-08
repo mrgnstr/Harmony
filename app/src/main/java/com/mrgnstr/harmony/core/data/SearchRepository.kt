@@ -35,7 +35,6 @@ class SearchRepository @Inject constructor(
     private val dao: SearchDao,
     private val library: LibraryRepository,
     private val playlists: PlaylistRepository,
-    private val images: ArtistImageStore,
 ) {
     val recents = dao.recents()
 
@@ -45,20 +44,13 @@ class SearchRepository @Inject constructor(
             dao.songs(match),
             library.albums,
             library.artists,
-            library.artistIndex,
-            combine(playlists.playlistsWithFavourites, images.images) { p, img -> p to img },
-        ) { rows, albums, artists, index, (allPlaylists, imageMap) ->
+            playlists.playlistsWithFavourites,
+        ) { rows, albums, artists, allPlaylists ->
             val songs = rows.map { it.toModel() }.sortedByDescending { SearchRanking.score(it.title, query) }
             val matchedAlbums = albums.filter { SearchQuery.matches("${it.title} ${it.artist}", query) }
                 .sortedByDescending { SearchRanking.score(it.title, query) }
-            val releases = HashMap<String, MutableList<Album>>()
-            for (album in albums) for (name in index.artistsOf(album.artist)) releases.getOrPut(name.lowercase()) { ArrayList() } += album
             val matchedArtists = artists.filter { SearchQuery.matches(it.name, query) }
                 .sortedByDescending { SearchRanking.score(it.name, query) }
-                .map { artist ->
-                    val withCover = releases[artist.name.lowercase()]?.let(::heroOf)?.let { artist.copy(artAlbumId = it.id, artSongId = it.artSongId) } ?: artist
-                    withCover.copy(imagePath = imageMap[artist.name]?.path)
-                }
             val matchedPlaylists = allPlaylists
                 .filter { (!it.isFavourites || it.songCount > 0) && SearchQuery.matches(it.name, query) }
                 .sortedByDescending { SearchRanking.score(it.name, query) }

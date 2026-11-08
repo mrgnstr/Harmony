@@ -235,6 +235,7 @@ class SubsonicApiClient @Inject constructor(
                 name = name,
                 coverArtId = s.strOrNull("coverArt"),
                 albumCount = s.int("albumCount"),
+                imageUrl = s.strOrNull("artistImageUrl"),
             )
         }
         return ArtistExtraInfo(

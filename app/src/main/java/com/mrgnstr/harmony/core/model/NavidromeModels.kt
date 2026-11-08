@@ -255,6 +255,8 @@ data class SimilarArtistRef(
     val name: String,
     val coverArtId: String? = null,
     val albumCount: Int = 0,
+    /** The server's picture of the artist (a signed, public URL), for artists the library does not have. */
+    val imageUrl: String? = null,
 )
 
 /** Rich Navidrome/OpenSubsonic artist metadata (biography, roles, similar artists, images). */

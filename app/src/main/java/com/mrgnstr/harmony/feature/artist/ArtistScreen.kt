@@ -40,6 +40,7 @@ import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
+import com.mrgnstr.harmony.core.model.Artist
 import com.mrgnstr.harmony.core.model.SimilarArtistRef
 import com.mrgnstr.harmony.core.model.Song
 
@@ -98,7 +99,7 @@ fun ArtistRoute(
                             val sides = LocalSideInsets.current
                             LazyRow(Modifier.bleedSides(sides), contentPadding = sides.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(similar, key = { "sim:${it.id}:${it.name}" }) { sim ->
-                                    ArtistShelfTile(shelfItem(sim), { openArtist?.invoke(sim.name) }, Modifier.width(ArtistShelfTileWidth))
+                                    ArtistShelfTile(shelfItem(sim, state.libraryArtists), { openArtist?.invoke(sim.name) }, Modifier.width(ArtistShelfTileWidth))
                                 }
                             }
                         }
@@ -123,7 +124,7 @@ fun ArtistRoute(
                     DropdownMenuItem(text = { Text("Artist info") }, leadingIcon = { SymbolIcon(Symbols.Info, null) }, onClick = { close(); openInfo() })
                     DropdownMenuItem(text = { Text(if (state.favourite) "Remove from favourites" else "Favourite") }, leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (state.favourite) 1f else 0f) }, onClick = { close(); viewModel.toggleFavourite() })
                     DropdownMenuItem(text = { Text("Choose artist image") }, leadingIcon = { SymbolIcon(Symbols.Image, null) }, onClick = { close(); photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                    if (state.imagePath != null) DropdownMenuItem(text = { Text("Use default image") }, onClick = { close(); viewModel.clearImage() })
+                    if (state.customImage) DropdownMenuItem(text = { Text("Use default image") }, onClick = { close(); viewModel.clearImage() })
                     DropdownMenuItem(text = { Text("Choose title logo") }, leadingIcon = { SymbolIcon(Symbols.Edit, null) }, onClick = { close(); logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
                     if (state.logoPath != null) DropdownMenuItem(text = { Text("Use default title") }, onClick = { close(); viewModel.clearImage(logo = true) })
                     if (state.remoteExtra != null) {
@@ -334,8 +335,9 @@ fun ArtistReleasesRoute(
     AlbumGridPage(shelf.title, name, state.releases(shelf), state.loaded, onBack, onOpenAlbum)
 }
 
-private fun shelfItem(sim: SimilarArtistRef) =
-    ArtistShelfItem(sim.name, sim.albumCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" })
+/** A library artist wears its own picture like every other artist tile; one the library lacks, the server's. */
+private fun shelfItem(sim: SimilarArtistRef, library: Map<String, Artist>) =
+    ArtistShelfItem(sim.name, sim.albumCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" }, library[sim.name.lowercase()], sim.imageUrl)
 
 @Composable
 fun SimilarArtistsRoute(
@@ -347,5 +349,5 @@ fun SimilarArtistsRoute(
     val state by viewModel.state.collectAsStateWithLifecycle()
     PageColorSource(state.accent?.let { ColorSource.Seed(it) })
     val similar = state.remoteExtra?.similarArtists.orEmpty()
-    ArtistGridPage("Similar Artists", name, similar.map(::shelfItem), state.loaded, onBack, onOpenArtist)
+    ArtistGridPage("Similar Artists", name, similar.map { shelfItem(it, state.libraryArtists) }, state.loaded, onBack, onOpenArtist)
 }

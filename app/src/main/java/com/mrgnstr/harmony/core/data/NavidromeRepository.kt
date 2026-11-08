@@ -358,7 +358,19 @@ class NavidromeRepository @Inject constructor(
                     songDao.upsert(mergedSongs.map { it.toEntity() })
                 }
                 navidromeDao.upsertAlbumExtras(albumExtras.map { it.toEntity() })
-                navidromeDao.upsertArtistExtras(artistExtras.map { it.toEntity() })
+                // The catalog list carries no similar artists, and the Subsonic one no biography: keep what artist pages fetched,
+                // or every sync would blank the Similar Artists shelf until the page was opened again.
+                val old = navidromeDao.allArtistExtras().associateBy { it.remoteId }
+                navidromeDao.upsertArtistExtras(artistExtras.map { fresh ->
+                    val e = fresh.toEntity()
+                    val o = old[fresh.remoteId] ?: return@map e
+                    e.copy(
+                        similarArtistsJson = if (fresh.similarArtists.isEmpty()) o.similarArtistsJson else e.similarArtistsJson,
+                        biography = e.biography ?: o.biography,
+                        mbzArtistId = e.mbzArtistId ?: o.mbzArtistId,
+                        externalUrl = e.externalUrl ?: o.externalUrl,
+                    )
+                })
             }
 
             // 2. Sync Starred (Favourites)

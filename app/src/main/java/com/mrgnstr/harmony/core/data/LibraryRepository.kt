@@ -10,6 +10,7 @@ import com.mrgnstr.harmony.core.model.ArtistIndex
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.owner
 import com.mrgnstr.harmony.core.model.Genre
+import com.mrgnstr.harmony.core.model.heroOf
 import com.mrgnstr.harmony.core.model.Song
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,6 +29,8 @@ class LibraryRepository @Inject constructor(
     private val dao: SongDao,
     sync: LibrarySync,
     navidrome: NavidromeRepository,
+    imageStore: ArtistImageStore,
+    serverImages: ServerArtistImages,
     settings: SettingsStore,
     @ApplicationScope scope: CoroutineScope,
 ) {
@@ -51,8 +54,12 @@ class LibraryRepository @Inject constructor(
     }.flowOn(Dispatchers.Default)
     val artistIndex: Flow<ArtistIndex> = songs.map(ArtistIndex::of).flowOn(Dispatchers.Default)
 
-    /** One entry per artist, with collaboration credits split into their artists (see [ArtistIndex]). */
-    val artists: Flow<List<Artist>> = songs.map { list ->
+    /**
+     * One entry per artist, with collaboration credits split into their artists (see [ArtistIndex]). The one place that decides how an
+     * artist is pictured, for every list and the artist page alike: the user's own photo, else the server's picture, else the cover of
+     * the release the artist's page opens with ([heroOf]).
+     */
+    val artists: Flow<List<Artist>> = combine(songs, albums, imageStore.images, serverImages.images) { list, albums, custom, server ->
         val index = ArtistIndex.of(list)
         class Acc(val name: String) { var songs = 0; val albums = HashSet<Long>(); var artAlbumId = Long.MAX_VALUE; var artSongId = Long.MAX_VALUE }
         val byName = HashMap<String, Acc>()
@@ -63,7 +70,16 @@ class LibraryRepository @Inject constructor(
             acc.artAlbumId = minOf(acc.artAlbumId, song.albumId)
             acc.artSongId = minOf(acc.artSongId, song.id)
         }
-        byName.values.map { Artist(it.name, it.songs, it.albums.size, it.artAlbumId, it.artSongId) }
+        val releases = HashMap<String, MutableList<Album>>()
+        for (album in albums) for (name in index.artistsOf(album.artist)) releases.getOrPut(name.lowercase()) { ArrayList() } += album
+        byName.values.map {
+            val hero = releases[it.name.lowercase()]?.let(::heroOf)
+            Artist(
+                it.name, it.songs, it.albums.size,
+                artAlbumId = hero?.id ?: it.artAlbumId, artSongId = hero?.artSongId ?: it.artSongId,
+                imagePath = (custom[it.name] ?: server[it.name])?.path,
+            )
+        }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }.flowOn(Dispatchers.Default)
     /** The albums with at least one song in [genre]. */

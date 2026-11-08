@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.mrgnstr.harmony.core.designsystem.ArtistPicture
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
@@ -155,10 +156,8 @@ fun ArtistsTab(viewModel: LibraryViewModel, onOpenArtist: (Artist) -> Unit) {
                     }
                 },
             ) { cover ->
-                // Local files carry no artist photos: the picture is their own image, or the cover of one of their albums.
-                val custom = artist.imagePath
-                if (custom != null) AsyncImage(File(custom), null, cover, contentScale = ContentScale.Crop)
-                else ArtworkImage(artist.artSongId, artist.artAlbumId, cover)
+                // Their own photo, else the server's picture of them, else the cover of one of their albums.
+                ArtistPicture(artist, cover)
             }
         }
     }
