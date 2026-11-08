@@ -259,12 +259,12 @@ private fun focusedRow(rows: List<LyricRow>, litEnds: LongArray, p: Long): Int {
  * (a seek) is taken at once.
  */
 @Composable
-private fun rememberSmoothPosition(positionMs: Long, playing: Boolean, active: Boolean, positionNow: () -> Long): State<Long> {
+private fun rememberSmoothPosition(positionMs: Long, playing: Boolean, active: Boolean, speed: Float, positionNow: () -> Long): State<Long> {
     val smooth = remember { mutableLongStateOf(positionMs + SyncLeadMs) }
     LaunchedEffect(positionMs, playing, active) {
         if (!playing || !active) smooth.longValue = positionMs + SyncLeadMs
     }
-    LaunchedEffect(playing, active) {
+    LaunchedEffect(playing, active, speed) {
         if (!playing || !active) return@LaunchedEffect
         var last = withFrameNanos { it }
         var lastRaw = positionNow()
@@ -281,8 +281,8 @@ private fun rememberSmoothPosition(positionMs: Long, playing: Boolean, active: B
                 anchorRaw = raw.toDouble()
                 anchorAt = now
             }
-            val estimate = anchorRaw + (now - anchorAt) / 1_000_000.0
-            shown += dt
+            val estimate = anchorRaw + (now - anchorAt) / 1_000_000.0 * speed
+            shown += dt * speed
             val error = estimate - shown
             if (Math.abs(error) > SnapMs) shown = estimate
             else shown += error * (dt / SlewMs).coerceAtMost(1.0)
@@ -518,7 +518,7 @@ private fun LyricsList(
     onSeek: (Long) -> Unit,
 ) {
     val density = LocalDensity.current
-    val pos = rememberSmoothPosition(progress.positionMs, playing, active = synced, positionNow)
+    val pos = rememberSmoothPosition(progress.positionMs, playing, active = synced, progress.speed, positionNow)
     val litEnds = remember(rows) { LongArray(rows.size) { litEndOf(rows[it]) } }
     // The list starts on the sung row (no ripple on the way in).
     val state = remember(rows) { ListState(rows.size, if (synced) focusedRow(rows, litEnds, pos.value) else 0).also { it.synced = synced } }

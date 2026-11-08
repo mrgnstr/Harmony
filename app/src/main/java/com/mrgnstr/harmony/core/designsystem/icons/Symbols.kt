@@ -79,6 +79,7 @@ object Symbols {
     val FilterList = Symbol('\uE152')
     val Equalizer = Symbol('\uE01D')
     val Speed = Symbol('\uE9E4')
+    val Nightlight = Symbol('\uF03D')
     val CheckCircle = Symbol('\uF0BE')
     val Error = Symbol('\uF8B6')
     val Wifi = Symbol('\uE63E')

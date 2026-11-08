@@ -34,6 +34,8 @@ data class PlaybackSnapshot(
     val albumId: Long = 0,
     val albumTitle: String = "",
     val isPlaying: Boolean = false,
+    /** Wants to play but is waiting for data (a stream, a seek): the play button shows a loading indicator. */
+    val isBuffering: Boolean = false,
     val hasMedia: Boolean = false,
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
@@ -44,7 +46,14 @@ data class PlaybackSnapshot(
     val songId: Long? get() = mediaId?.toLongOrNull()
 }
 
-data class PlaybackProgress(val positionMs: Long = 0, val durationMs: Long = 0)
+/** [speed]: the playback rate (1 normally, [NightcoreSpeed] in nightcore); positions are in the song's own time, which passes [speed] times as fast. */
+data class PlaybackProgress(val positionMs: Long = 0, val durationMs: Long = 0, val speed: Float = 1f)
+
+/**
+ * Nightcore's speed-up. The genre's template is a 25-30% speed-up and the usual figure is 35%: a 33 1/3 rpm record played at
+ * 45 rpm (45 / 33.33 = 1.35), which lifts the pitch by 5.2 semitones. Speed and pitch move together, as on a turntable.
+ */
+const val NightcoreSpeed = 1.35f
 
 /** [queued]: added with Play Next / Play Last, so it belongs to the "Queue" section rather than the source being played. */
 data class QueueItem(val mediaId: String, val title: String, val artist: String, val albumId: Long, val queued: Boolean = false) {
@@ -126,6 +135,7 @@ class PlayerConnection @Inject constructor(
             albumId = extras?.getLong(EXTRA_ALBUM_ID) ?: 0L,
             albumTitle = item?.mediaMetadata?.albumTitle?.toString().orEmpty(),
             isPlaying = player.isPlaying,
+            isBuffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING,
             hasMedia = player.mediaItemCount > 0,
             hasNext = player.hasNextMediaItem(),
             hasPrevious = player.hasPreviousMediaItem(),
@@ -203,7 +213,7 @@ class PlayerConnection @Inject constructor(
     /** Position ticks only while somebody collects: 4 Hz while playing, 1 Hz otherwise. Collect on the main thread. */
     fun progress(): Flow<PlaybackProgress> = flow {
         while (true) {
-            controller?.let { emit(PlaybackProgress(it.currentPosition.coerceAtLeast(0), it.duration.coerceAtLeast(0))) }
+            controller?.let { emit(PlaybackProgress(it.currentPosition.coerceAtLeast(0), it.duration.coerceAtLeast(0), it.playbackParameters.speed)) }
             delay(if (_state.value.isPlaying) 250 else 1000)
         }
     }.distinctUntilChanged()
@@ -211,7 +221,8 @@ class PlayerConnection @Inject constructor(
     /** The position right now, from the player itself when this process has it (the controller's is stepped by the session every 3 s); on the main thread. */
     fun currentPositionMs(): Long = (PlaybackService.livePlayer ?: controller)?.currentPosition?.coerceAtLeast(0) ?: 0L
 
-    fun togglePlayPause() = withController { if (it.isPlaying) it.pause() else it.play() }
+    // Pressing while it buffers pauses (it is "playing" as far as the user is concerned).
+    fun togglePlayPause() = withController { if (it.isPlaying || it.playWhenReady && it.playbackState == Player.STATE_BUFFERING) it.pause() else it.play() }
     fun skipToNext() = withController { it.seekToNextMediaItem() }
     fun skipToPrevious() = withController { it.seekToPreviousMediaItem() }
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs) }

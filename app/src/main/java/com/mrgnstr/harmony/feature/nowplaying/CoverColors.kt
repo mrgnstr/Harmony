@@ -3,10 +3,14 @@ package com.mrgnstr.harmony.feature.nowplaying
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import com.materialkolor.hct.Hct
 
 /**
@@ -85,5 +89,42 @@ fun animateCoverColors(target: CoverColors): CoverColors {
         tonal = animateColorAsState(target.tonal, spec, label = "tonal").value,
         scrim = animateFloatAsState(target.scrim, tween(500), label = "scrim").value,
         lightTop = target.lightTop,
+    )
+}
+
+/**
+ * Menus and sheets open in windows of their own, which take their colours from the app's theme: the page behind Now Playing. This
+ * theme gives them the controls' colours instead: surfaces are deep (or, on a bright cover, pale) tints of the cover's hue, text and
+ * accents are the controls' own. Wrap the menu or sheet call itself, as a container takes its colour where it is called.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun NowPlayingPopupTheme(content: @Composable () -> Unit) {
+    val c = LocalCoverColors.current
+    val base = MaterialTheme.colorScheme
+    val hct = Hct.fromInt(c.accent.toArgb())
+    val coloured = hct.chroma >= 6.0
+    val dark = c.text.luminance() > 0.5f
+    fun tone(chroma: Double, tone: Double) = Color(Hct.from(hct.hue, if (coloured) chroma else 0.0, tone).toInt())
+    val scheme = if (dark) {
+        base.copy(
+            surface = tone(10.0, 12.0), surfaceContainerLowest = tone(10.0, 8.0), surfaceContainerLow = tone(12.0, 16.0),
+            surfaceContainer = tone(12.0, 19.0), surfaceContainerHigh = tone(12.0, 23.0), surfaceContainerHighest = tone(12.0, 27.0),
+            surfaceVariant = tone(12.0, 27.0), onSurface = c.text, onSurfaceVariant = c.textSoft,
+            primary = c.accent, onPrimary = c.onAccent, secondaryContainer = tone(20.0, 32.0), onSecondaryContainer = c.text,
+            outline = c.textSoft, outlineVariant = c.text.copy(alpha = 0.2f), inverseSurface = c.text, inverseOnSurface = c.onAccent,
+        )
+    } else {
+        base.copy(
+            surface = tone(10.0, 97.0), surfaceContainerLowest = tone(10.0, 99.0), surfaceContainerLow = tone(10.0, 95.0),
+            surfaceContainer = tone(12.0, 93.0), surfaceContainerHigh = tone(12.0, 91.0), surfaceContainerHighest = tone(12.0, 88.0),
+            surfaceVariant = tone(12.0, 88.0), onSurface = c.text, onSurfaceVariant = c.textSoft,
+            primary = c.accent, onPrimary = c.onAccent, secondaryContainer = tone(20.0, 82.0), onSecondaryContainer = c.text,
+            outline = c.textSoft, outlineVariant = c.text.copy(alpha = 0.2f), inverseSurface = c.text, inverseOnSurface = c.onAccent,
+        )
+    }
+    MaterialTheme(
+        colorScheme = scheme, motionScheme = MaterialTheme.motionScheme, shapes = MaterialTheme.shapes, typography = MaterialTheme.typography,
+        content = content,
     )
 }

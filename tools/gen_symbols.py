@@ -101,6 +101,7 @@ ICONS = {
     "FilterList": "filter_list",
     "Equalizer": "equalizer",
     "Speed": "speed",
+    "Nightlight": "nightlight",
     "CheckCircle": "check_circle",
     "Error": "error",
     "Wifi": "wifi",

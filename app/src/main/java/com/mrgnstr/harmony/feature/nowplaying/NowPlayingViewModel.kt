@@ -16,6 +16,7 @@ import com.mrgnstr.harmony.core.model.AudioFormat
 import com.mrgnstr.harmony.core.model.FormatTag
 import com.mrgnstr.harmony.core.model.JukeboxState
 import com.mrgnstr.harmony.core.model.Lyrics
+import com.mrgnstr.harmony.core.playback.NightcoreSpeed
 import com.mrgnstr.harmony.core.playback.PlaybackProgress
 import com.mrgnstr.harmony.core.playback.PlaybackSnapshot
 import com.mrgnstr.harmony.core.playback.PlayerConnection
@@ -46,6 +47,7 @@ class NowPlayingViewModel @Inject constructor(
     private val diffusedArt: com.mrgnstr.harmony.core.artwork.DiffusedArtCache,
     private val libraryRepository: LibraryRepository,
     private val formatProbe: AudioFormatProbe,
+    private val settings: com.mrgnstr.harmony.core.datastore.SettingsStore,
     val navidrome: NavidromeRepository,
 ) : ViewModel() {
     val snapshot: StateFlow<PlaybackSnapshot> = player.state
@@ -55,6 +57,17 @@ class NowPlayingViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     val hasJukeboxRole: StateFlow<Boolean> = navidrome.activeAccount.map { it?.jukeboxRole == true || it?.isAdmin == true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val nightcore: StateFlow<Boolean> = settings.nightcore.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val nightcoreSpeed: StateFlow<Float> = settings.nightcoreSpeed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NightcoreSpeed)
+    /** Moving the slider switches nightcore on. */
+    fun setNightcoreSpeed(speed: Float) {
+        viewModelScope.launch {
+            settings.setNightcoreSpeed(speed)
+            if (!nightcore.value) settings.setNightcore(true)
+        }
+    }
+    fun toggleNightcore() { viewModelScope.launch { settings.setNightcore(!nightcore.value) } }
 
     /** Ticks only while the full player is on screen. */
     val progress: StateFlow<PlaybackProgress> = player.progress()

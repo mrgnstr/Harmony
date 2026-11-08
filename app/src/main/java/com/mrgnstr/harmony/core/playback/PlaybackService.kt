@@ -18,6 +18,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.session.MediaSessionService
 import com.mrgnstr.harmony.core.common.ApplicationScope
@@ -116,6 +117,14 @@ class PlaybackService : MediaSessionService() {
                     rgPreampDb = preamp
                     applyReplayGain(player, player.currentMediaItem)
                 }
+        }
+
+        // Nightcore: speed and pitch are one factor, so Sonic resamples (speed / pitch = 1 means no time-stretching, just the
+        // turntable effect). The setting is applied here, so the notification and Bluetooth controls play the same thing.
+        scope.launch {
+            combine(settings.nightcore, settings.nightcoreSpeed) { on, speed -> if (on) speed else 1f }.collect { speed ->
+                player.playbackParameters = PlaybackParameters(speed, speed)
+            }
         }
 
         // Back to where playback stopped, paused. Saving only starts afterwards, so the empty player cannot overwrite the queue.

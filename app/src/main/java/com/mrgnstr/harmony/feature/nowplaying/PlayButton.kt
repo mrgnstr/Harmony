@@ -7,6 +7,16 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.size
@@ -131,9 +141,9 @@ private class MorphingShape(radii: FloatArray) : Shape {
 
 /** Now Playing's big play/pause button, in the cover's colours; the glyph is cut out so the cover shows through. */
 @Composable
-fun PlayButton(playing: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+fun PlayButton(playing: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier, buffering: Boolean = false) {
     val c = LocalCoverColors.current
-    MorphingPlayButton(playing, onToggle, 96.dp, 44.dp, c.accent, c.onAccent, cutOut = true, modifier = modifier)
+    MorphingPlayButton(playing, onToggle, 96.dp, 44.dp, c.accent, c.onAccent, cutOut = true, modifier = modifier, buffering = buffering)
 }
 
 /**
@@ -151,6 +161,7 @@ fun MorphingPlayButton(
     contentColor: Color,
     modifier: Modifier = Modifier,
     cutOut: Boolean = false,
+    buffering: Boolean = false,
 ) {
     val density = LocalDensity.current
     val pressedCorners = IconButtonDefaults.toggleableShapes().pressedShape as CornerBasedShape
@@ -199,8 +210,45 @@ fun MorphingPlayButton(
             shape = MorphingShape(shown)
             clip = true
         },
-    ) { PlayPauseIcon(playing, glyph, blendMode = if (cutOut) BlendMode.Clear else BlendMode.SrcOver) }
+    ) {
+        // Buffering shows after a beat, so the usual moment between songs does not flash it.
+        var waiting by remember { mutableStateOf(false) }
+        LaunchedEffect(buffering) {
+            if (buffering) { delay(BufferingDelayMs); waiting = true } else waiting = false
+        }
+        // 0 = the glyph, 1 = the indicator: the glyph's two pieces gather into one round blob (as the play morphs into the pause),
+        // and the indicator takes over from the blob, so nothing snaps in or out.
+        val gather = animateFloatAsState(if (waiting) 1f else 0f, spring(dampingRatio = 0.8f, stiffness = 260f), label = "buffering").value.coerceIn(0f, 1f)
+        val handoff = ((gather - 0.75f) / 0.25f).coerceIn(0f, 1f)
+        Box(contentAlignment = Alignment.Center) {
+            PlayPauseIcon(playing, glyph, blendMode = if (cutOut) BlendMode.Clear else BlendMode.SrcOver, loading = gather)
+            if (gather > 0.6f) {
+                LoadingIndicator(
+                    Modifier
+                        .size(glyph * 0.76f)
+                        .then(if (cutOut) Modifier.cutOutOf { handoff } else Modifier.graphicsLayer { alpha = handoff }),
+                    color = contentColor,
+                )
+            }
+        }
+    }
 }
+
+/**
+ * Draws this node as a cut-out of what is under it (the button's container), like the play glyph: the node is drawn in a layer that
+ * is subtracted (DstOut) at [alpha]. (A graphicsLayer alpha cannot do this: it would put the node in a layer of its own, which
+ * has nothing under it to cut.)
+ */
+private fun Modifier.cutOutOf(alpha: () -> Float): Modifier = drawWithContent {
+    drawIntoCanvas { canvas ->
+        val paint = Paint().apply { blendMode = BlendMode.DstOut; this.alpha = alpha() }
+        canvas.saveLayer(Rect(Offset.Zero, size), paint)
+        drawContent()
+        canvas.restore()
+    }
+}
+
+private const val BufferingDelayMs = 300L
 
 /**
  * Play and pause as one glyph that morphs: the triangle is split in two pieces that become the two bars (each piece has four
@@ -213,27 +261,43 @@ fun PlayPauseIcon(
     modifier: Modifier = Modifier,
     tint: Color = LocalContentColor.current,
     blendMode: BlendMode = BlendMode.SrcOver,
+    /** 0..1: the two pieces gather into one round blob (the buffering indicator takes over from it) and fade out at the end. */
+    loading: Float = 0f,
 ) {
     val morph = animateFloatAsState(if (playing) 1f else 0f, spring(dampingRatio = 0.8f, stiffness = 260f), label = "play-pause")
     val path = remember { Path() }
     Canvas(modifier.size(size).semantics { contentDescription = if (playing) "Pause" else "Play"; role = Role.Image }) {
         val t = morph.value
-        val rounding = 0.055f * this.size.minDimension
+        val rounding = (0.055f + (BlobRounding - 0.055f) * loading) * this.size.minDimension
+        // The pieces are drawn opaque into one layer, which is composited at the fade (and, for a cut-out, subtracted: Clear ignores
+        // alpha), so the fill and the stroke of a piece, and the two pieces, never add up where they overlap.
+        val fade = 1f - ((loading - 0.75f) / 0.25f).coerceIn(0f, 1f)
         fun piece(play: FloatArray, pause: FloatArray) {
             path.reset()
             for (i in 0 until 4) {
-                val x = (play[2 * i] + (pause[2 * i] - play[2 * i]) * t) * this.size.width
-                val y = (play[2 * i + 1] + (pause[2 * i + 1] - play[2 * i + 1]) * t) * this.size.height
+                val gx = BlobCorners[2 * i]
+                val gy = BlobCorners[2 * i + 1]
+                val x = ((play[2 * i] + (pause[2 * i] - play[2 * i]) * t) * (1f - loading) + gx * loading) * this.size.width
+                val y = ((play[2 * i + 1] + (pause[2 * i + 1] - play[2 * i + 1]) * t) * (1f - loading) + gy * loading) * this.size.height
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             path.close()
-            drawPath(path, tint, style = Fill, blendMode = blendMode)
-            drawPath(path, tint, style = Stroke(rounding * 2f, join = StrokeJoin.Round, cap = StrokeCap.Round), blendMode = blendMode)
+            drawPath(path, tint, style = Fill)
+            drawPath(path, tint, style = Stroke(rounding * 2f, join = StrokeJoin.Round, cap = StrokeCap.Round))
         }
-        piece(PlayLeft, PauseLeft)
-        piece(PlayRight, PauseRight)
+        if (fade > 0f) drawIntoCanvas { canvas ->
+            val paint = Paint().apply { this.blendMode = if (blendMode == BlendMode.Clear) BlendMode.DstOut else blendMode; alpha = fade }
+            canvas.saveLayer(androidx.compose.ui.geometry.Rect(Offset.Zero, this.size), paint)
+            piece(PlayLeft, PauseLeft)
+            piece(PlayRight, PauseRight)
+            canvas.restore()
+        }
     }
 }
+
+/** Where the four corners of each piece meet when gathered (a tiny square at the centre, rounded into a disc by [BlobRounding]). */
+private val BlobCorners = floatArrayOf(0.47f, 0.47f, 0.53f, 0.47f, 0.53f, 0.53f, 0.47f, 0.53f)
+private const val BlobRounding = 0.21f
 
 // Four corners per piece (top-left, top-right, bottom-right, bottom-left), in 0..1 of the icon. Inset by the corner rounding,
 // which the stroke adds back.

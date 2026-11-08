@@ -385,7 +385,7 @@ fun PlayerSheet(
                         Text(snap.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     MorphingPlayButton(
-                        snap.isPlaying, viewModel::togglePlayPause, size = 48.dp, glyph = 24.dp,
+                        snap.isPlaying, viewModel::togglePlayPause, size = 48.dp, glyph = 24.dp, buffering = snap.isBuffering,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                     val nextKick = rememberSkipKick(next = true, reach = 6.dp)

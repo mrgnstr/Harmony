@@ -91,6 +91,8 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     private val wifiQualityKey = stringPreferencesKey("wifi_stream_quality")
     private val mobileQualityKey = stringPreferencesKey("mobile_stream_quality")
     private val replayGainModeKey = stringPreferencesKey("replay_gain_mode")
+    private val nightcoreKey = booleanPreferencesKey("nightcore")
+    private val nightcoreSpeedKey = floatPreferencesKey("nightcore_speed")
     private val replayGainPreampKey = floatPreferencesKey("replay_gain_preamp_db")
     private val syncPlayQueueKey = booleanPreferencesKey("sync_play_queue")
     private val scrobbleKey = booleanPreferencesKey("scrobble_to_server")
@@ -117,6 +119,20 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setMobileStreamQuality(quality: StreamQuality) {
         context.settingsDataStore.edit { it[mobileQualityKey] = quality.name }
+    }
+
+    /** Nightcore: every song plays [com.mrgnstr.harmony.core.playback.NightcoreSpeed] times faster with its pitch raised by the same factor. */
+    val nightcore: Flow<Boolean> = context.settingsDataStore.data.map { it[nightcoreKey] == true }
+
+    suspend fun setNightcore(on: Boolean) {
+        context.settingsDataStore.edit { it[nightcoreKey] = on }
+    }
+
+    /** The speed (and pitch factor) nightcore plays at; [com.mrgnstr.harmony.core.playback.NightcoreSpeed] until the slider moves it. */
+    val nightcoreSpeed: Flow<Float> = context.settingsDataStore.data.map { it[nightcoreSpeedKey] ?: com.mrgnstr.harmony.core.playback.NightcoreSpeed }
+
+    suspend fun setNightcoreSpeed(speed: Float) {
+        context.settingsDataStore.edit { it[nightcoreSpeedKey] = speed }
     }
 
     val replayGainMode: Flow<ReplayGainMode> = context.settingsDataStore.data.map { prefs ->

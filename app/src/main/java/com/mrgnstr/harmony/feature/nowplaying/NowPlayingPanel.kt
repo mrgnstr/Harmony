@@ -220,8 +220,10 @@ internal fun PlayingTitle(
                 },
             ) {
                 MarqueeText(snap.artist, artist, c.textSoft)
-                DropdownMenu(picking, { picking = false }) {
-                    artists.forEach { name -> DropdownMenuItem(text = { Text(name) }, onClick = { picking = false; onOpenArtist(name) }) }
+                NowPlayingPopupTheme {
+                    DropdownMenu(picking, { picking = false }) {
+                        artists.forEach { name -> DropdownMenuItem(text = { Text(name) }, onClick = { picking = false; onOpenArtist(name) }) }
+                    }
                 }
             }
         }

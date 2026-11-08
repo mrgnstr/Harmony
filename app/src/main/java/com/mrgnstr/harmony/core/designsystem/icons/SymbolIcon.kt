@@ -16,6 +16,9 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -42,7 +45,7 @@ private class Glyph(val ends: IntArray, val onCurve: BooleanArray, val instances
     private val ys = FloatArray(onCurve.size)
 
     /** Fills [path] with the outline at [fill] (0…1) and [weight] (100…700), scaled so the 960-unit em becomes [sizePx]. */
-    fun outline(path: Path, fill: Float, weight: Float, sizePx: Float) {
+    fun outline(path: Path, fill: Float, weight: Float, sizePx: Float, only: IntArray? = null) {
         val f = fill.coerceIn(0f, 1f)
         val w = weight.coerceIn(100f, 700f)
         // Weight is piecewise linear between the 100, 400 and 700 masters.
@@ -60,8 +63,8 @@ private class Glyph(val ends: IntArray, val onCurve: BooleanArray, val instances
         }
         path.reset()
         var start = 0
-        for (end in ends) {
-            contour(path, start, end)
+        for ((k, end) in ends.withIndex()) {
+            if (only == null || k in only) contour(path, start, end)
             start = end + 1
         }
     }
@@ -134,6 +137,8 @@ private object GlyphStore {
  * A Material Symbol at [size], drawn from its outline (not from a font, so no system font replacement can touch it).
  * [fill] 0 = outline … 1 = filled and [weight] 100…700 interpolate the font's own masters on every API level.
  * [blendMode] [BlendMode.Clear] cuts the glyph out of what is behind it (the parent must be an offscreen layer).
+ * [gap] clears a margin of that width around the glyph first (from what is already drawn in the same layer), so it can overlap
+ * another glyph and still stand apart from it.
  */
 @Composable
 fun SymbolIcon(
@@ -145,10 +150,11 @@ fun SymbolIcon(
     fill: Float = 0f,
     weight: Int = 400,
     blendMode: BlendMode = BlendMode.SrcOver,
+    gap: Dp = 0.dp,
 ) {
     val fillState = rememberUpdatedState(fill)
     val weightState = rememberUpdatedState(weight.toFloat())
-    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fillState, weightState, blendMode)
+    SymbolCanvas(symbol, contentDescription, modifier, size, tint, fillState, weightState, blendMode, gap)
 }
 
 /** [SymbolIcon] whose fill springs between outline and filled when [filled] changes (redraws only, no recomposition). */
@@ -168,6 +174,41 @@ fun AnimatedSymbolIcon(
     SymbolCanvas(symbol, contentDescription, modifier, size, tint, fill, weightState, blendMode)
 }
 
+/**
+ * A glyph drawn in parts, each of which [drawPart] draws as it likes (moved, scaled, in another blend): [groups] lists the
+ * contour indices of each part, and [drawPart] gets that part's path. The glyph's own cut-outs only work within a part, so a part
+ * that is a hole in another (the lyrics' text lines in the filled bubble) is for the caller to subtract. Read states in [fill]
+ * and in [drawPart] (they run in the draw phase, so animating them does not recompose).
+ */
+@Composable
+fun SymbolPartsIcon(
+    symbol: Symbol,
+    contentDescription: String?,
+    groups: List<IntArray>,
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    weight: Int = 400,
+    fill: () -> Float = { 0f },
+    drawPart: DrawScope.(group: Int, path: Path) -> Unit,
+) {
+    val glyph = GlyphStore.get(LocalContext.current)[symbol.char.code]
+    val path = remember { Path() }
+    val described = if (contentDescription != null) {
+        modifier.semantics { this.contentDescription = contentDescription; role = Role.Image }
+    } else modifier
+    Spacer(
+        described.size(size).drawWithCache {
+            onDrawBehind {
+                if (glyph == null) return@onDrawBehind
+                groups.forEachIndexed { i, g ->
+                    glyph.outline(path, fill(), weight.toFloat(), this.size.minDimension, g)
+                    drawPart(i, path)
+                }
+            }
+        },
+    )
+}
+
 @Composable
 private fun SymbolCanvas(
     symbol: Symbol,
@@ -178,6 +219,7 @@ private fun SymbolCanvas(
     fill: State<Float>,
     weight: State<Float>,
     blendMode: BlendMode = BlendMode.SrcOver,
+    gap: Dp = 0.dp,
 ) {
     val glyph = GlyphStore.get(LocalContext.current)[symbol.char.code]
     val tintState = rememberUpdatedState(tint)
@@ -190,6 +232,7 @@ private fun SymbolCanvas(
             onDrawBehind {
                 if (glyph == null) return@onDrawBehind
                 glyph.outline(path, fill.value, weight.value, this.size.minDimension)
+                if (gap > 0.dp) drawPath(path, Color.Black, style = Stroke(gap.toPx() * 2f, join = StrokeJoin.Round), blendMode = BlendMode.Clear)
                 drawPath(path, tintState.value, blendMode = blendMode)
             }
         },

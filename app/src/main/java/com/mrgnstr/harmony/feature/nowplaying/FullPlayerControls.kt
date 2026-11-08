@@ -2,6 +2,9 @@ package com.mrgnstr.harmony.feature.nowplaying
 
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
@@ -83,6 +86,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mrgnstr.harmony.core.designsystem.icons.AnimatedSymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.composed
+import androidx.compose.ui.input.pointer.PointerEventPass
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
+import com.mrgnstr.harmony.core.playback.NightcoreSpeed
 import com.mrgnstr.harmony.core.playback.PlaybackProgress
 import com.mrgnstr.harmony.core.playback.PlaybackSnapshot
 import com.mrgnstr.harmony.core.playback.QueueState
@@ -155,7 +166,7 @@ internal fun FullPlayerControls(
                 modifier = Modifier.size(width = 84.dp, height = 64.dp),
             ) { SkipIcon(Symbols.SkipPrevious, "Previous", prevKick, size = 32.dp) }
             // The glyph is cut out of the white button (an offscreen layer lets it clear the container), so the cover shows through.
-            PlayButton(snap.isPlaying, vm::togglePlayPause)
+            PlayButton(snap.isPlaying, vm::togglePlayPause, buffering = snap.isBuffering)
             FilledTonalIconButton(
                 onClick = { nextKick.kick(); vm.next() }, enabled = snap.hasNext, shapes = IconButtonDefaults.shapes(),
                 colors = IconButtonDefaults.filledTonalIconButtonColors(
@@ -167,10 +178,10 @@ internal fun FullPlayerControls(
 
         // Modes & overlays: Lyrics, Shuffle, Repeat, Queue, and Bookmark/Jukebox
         val shuffleFlip = rememberFlourish(bounce = 0.8f)
-        val repeatSpin = rememberFlourish(bounce = 0.8f)
         Row(hide.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
-            ModeToggle(panel.panel == NowPlayingPanel.Lyrics, { scope.launch { panel.toggle(NowPlayingPanel.Lyrics) } }) { blend, tint ->
-                SymbolIcon(Symbols.Lyrics, "Lyrics", tint = tint, blendMode = blend)
+            val lyricsKick = rememberLyricsKick()
+            ModeToggle(panel.panel == NowPlayingPanel.Lyrics, { lyricsKick.play(); scope.launch { panel.toggle(NowPlayingPanel.Lyrics) } }) { blend, tint ->
+                LyricsIcon(blend, tint, filled = panel.panel == NowPlayingPanel.Lyrics, kick = lyricsKick)
             }
             ModeToggle(queue.shuffled, { shuffleFlip.play(); vm.toggleShuffle() }) { blend, tint ->
                 // The crossing arrows flip over like a card.
@@ -179,19 +190,33 @@ internal fun FullPlayerControls(
                     modifier = Modifier.graphicsLayer { rotationX = 360f * shuffleFlip.value.value; cameraDistance = 12f * density },
                 )
             }
-            ModeToggle(queue.repeat != RepeatMode.Off, { repeatSpin.play(); vm.cycleRepeat() }) { blend, tint ->
-                SymbolIcon(
-                    if (queue.repeat == RepeatMode.One) Symbols.RepeatOne else Symbols.Repeat, "Repeat", tint = tint, blendMode = blend,
-                    weight = if (queue.repeat != RepeatMode.Off) 600 else 400,
-                    modifier = Modifier.graphicsLayer { rotationZ = 360f * repeatSpin.value.value },
-                )
+            val nightcore by vm.nightcore.collectAsStateWithLifecycle()
+            var showSpeed by remember { mutableStateOf(false) }
+            Box {
+                val kick = rememberNightcoreKick()
+                ModeToggle(nightcore, { kick.play(); vm.toggleNightcore() }, Modifier.onLongPress { showSpeed = true }) { blend, tint ->
+                    NightcoreIcon(blend, tint, weight = if (nightcore) 600 else 400, filled = nightcore, kick = kick)
+                }
             }
-            ModeToggle(showQueue, { showQueue = true }) { blend, tint ->
-                SymbolIcon(Symbols.QueueMusic, "Queue", tint = tint, blendMode = blend)
+            if (showSpeed) {
+                val speed by vm.nightcoreSpeed.collectAsStateWithLifecycle()
+                NightcoreSheet(speed, vm::setNightcoreSpeed, onDismiss = { showSpeed = false })
+            }
+            val repeatKick = rememberRepeatKick()
+            ModeToggle(queue.repeat != RepeatMode.Off, {
+                // Off -> all -> one -> off: the arrows swing round and trade places on the way on, and switching off is quiet.
+                if (queue.repeat != RepeatMode.One) repeatKick.play()
+                vm.cycleRepeat()
+            }) { blend, tint ->
+                RepeatIcon(blend, tint, weight = if (queue.repeat != RepeatMode.Off) 600 else 400, mode = queue.repeat, kick = repeatKick)
+            }
+            val queueKick = rememberQueueKick()
+            ModeToggle(showQueue, { queueKick.play(); showQueue = true }) { blend, tint ->
+                QueueIcon(blend, tint, queueKick)
             }
         }
 
-        if (showQueue) {
+        if (showQueue) NowPlayingPopupTheme {
             QueueModalSheet(
                 queue = queue,
                 hasNavidrome = hasNavidrome,
@@ -235,20 +260,22 @@ private fun LyricsOptions(hasTranslations: Boolean, hasPronunciations: Boolean, 
                 modifier = Modifier.size(40.dp),
             ) { SymbolIcon(Symbols.Translate, "Translations and pronunciation", size = 20.dp, tint = c.text) }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (hasTranslations) {
-                DropdownMenuItem(
-                    text = { Text("Translation") },
-                    onClick = { panel.showTranslation = !panel.showTranslation },
-                    trailingIcon = { if (panel.showTranslation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
-                )
-            }
-            if (hasPronunciations) {
-                DropdownMenuItem(
-                    text = { Text("Pronunciation") },
-                    onClick = { panel.showPronunciation = !panel.showPronunciation },
-                    trailingIcon = { if (panel.showPronunciation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
-                )
+        NowPlayingPopupTheme {
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                if (hasTranslations) {
+                    DropdownMenuItem(
+                        text = { Text("Translation") },
+                        onClick = { panel.showTranslation = !panel.showTranslation },
+                        trailingIcon = { if (panel.showTranslation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
+                    )
+                }
+                if (hasPronunciations) {
+                    DropdownMenuItem(
+                        text = { Text("Pronunciation") },
+                        onClick = { panel.showPronunciation = !panel.showPronunciation },
+                        trailingIcon = { if (panel.showPronunciation) SymbolIcon(Symbols.Check, null, size = 20.dp) },
+                    )
+                }
             }
         }
     }
@@ -260,7 +287,7 @@ private fun LyricsOptions(hasTranslations: Boolean, hasPronunciations: Boolean, 
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, content: @Composable (BlendMode, Color) -> Unit) {
+internal fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier, content: @Composable (BlendMode, Color) -> Unit) {
     val c = LocalCoverColors.current
     FilledTonalIconToggleButton(
         checked = checked,
@@ -269,9 +296,68 @@ internal fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, co
         colors = IconButtonDefaults.filledTonalIconToggleButtonColors(
             containerColor = c.tonal, contentColor = c.text, checkedContainerColor = c.accent, checkedContentColor = c.onAccent,
         ),
-        modifier = Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+        modifier = modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
     ) { content(if (checked) BlendMode.Clear else BlendMode.SrcOver, if (checked) c.onAccent else c.text) }
 }
+
+/**
+ * Long press that the button underneath does not also take as a click: it watches first (initial pass) and, once the press has
+ * lasted, consumes the rest of the gesture, which cancels the button's press.
+ */
+private fun Modifier.onLongPress(onLongPress: () -> Unit): Modifier = composed {
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation(PointerEventPass.Initial) }
+            if (up == null) {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                onLongPress()
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.forEach { it.consume() }
+                } while (event.changes.any { it.pressed })
+            }
+        }
+    }
+}
+
+/**
+ * The nightcore speed sheet: playback speed with the pitch following it (as on a turntable). The thumb's value is kept here and
+ * is the only truth while the sheet is open (the stored setting lags a drag, and following it made the thumb jump back).
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun NightcoreSheet(stored: Float, onSpeed: (Float) -> Unit, onDismiss: () -> Unit) = NowPlayingPopupTheme {
+    var value by remember { mutableFloatStateOf(stored) }
+    var sent by remember { mutableFloatStateOf(stored) }
+    fun apply(v: Float) {
+        value = v
+        val rounded = (v * 100f).roundToInt() / 100f
+        if (rounded != sent) { sent = rounded; onSpeed(rounded) }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp).padding(bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                SymbolIcon(Symbols.Nightlight, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text("Nightcore", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text("%.2f×".format(value), style = MaterialTheme.typography.headlineMedium)
+            }
+            androidx.compose.material3.Slider(value = value, onValueChange = ::apply, valueRange = SpeedRange)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Speed and pitch, %+.1f semitones".format(12f * kotlin.math.log2(value)),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                androidx.compose.material3.TextButton(onClick = { apply(NightcoreSpeed) }) { Text("Reset") }
+            }
+        }
+    }
+}
+
+private val SpeedRange = 0.5f..2f
 
 /** Codec, layout and quality of the playing file, on a translucent pill over the blurred cover. */
 @Composable
@@ -305,7 +391,8 @@ private fun SeekBar(progress: PlaybackProgress, playing: Boolean, onSeek: (Long)
     // instead of stepping (a step is a visible jump on a short song). A new report only corrects it when it has drifted
     // (a seek, a new song, a stall), so the ordinary report neither jerks it nor sets it back.
     val smooth = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(progress.positionMs, duration, playing) {
+    val speed = progress.speed
+    LaunchedEffect(progress.positionMs, duration, playing, speed) {
         val reported = progress.positionMs
         val shownMs = smooth.floatValue * duration
         val startMs = if (playing && kotlin.math.abs(reported - shownMs) < 400f) shownMs else reported.toFloat()
@@ -314,7 +401,7 @@ private fun SeekBar(progress: PlaybackProgress, playing: Boolean, onSeek: (Long)
         val t0 = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
-            smooth.floatValue = ((startMs + (now - t0) / 1_000_000f) / duration).coerceIn(0f, 1f)
+            smooth.floatValue = ((startMs + (now - t0) / 1_000_000f * speed) / duration).coerceIn(0f, 1f)
         }
     }
     val grip = animateFloatAsState(if (dragging != null) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "grip")
@@ -339,8 +426,8 @@ private fun SeekBar(progress: PlaybackProgress, playing: Boolean, onSeek: (Long)
             WaveTrack({ dragging ?: smooth.floatValue }, amplitude, grip, LocalCoverColors.current, Modifier.matchParentSize())
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(clock((fraction * duration).toLong()), style = MaterialTheme.typography.labelMedium, color = LocalCoverColors.current.textSoft)
-            Text("-" + clock(duration - (fraction * duration).toLong()), style = MaterialTheme.typography.labelMedium, color = LocalCoverColors.current.textSoft)
+            Text(clock((fraction * duration / speed).toLong()), style = MaterialTheme.typography.labelMedium, color = LocalCoverColors.current.textSoft)
+            Text("-" + clock(((duration - (fraction * duration).toLong()) / speed).toLong()), style = MaterialTheme.typography.labelMedium, color = LocalCoverColors.current.textSoft)
         }
     }
 }
