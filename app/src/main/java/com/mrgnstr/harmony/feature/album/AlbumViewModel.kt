@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 
 @Immutable
@@ -97,6 +99,17 @@ class AlbumViewModel @AssistedInject constructor(
                     val remoteFormats = songs.take(40).mapNotNull { s ->
                         val c = s.codec ?: return@mapNotNull null
                         AudioFormat(c, s.lossless, s.sampleRateHz, s.bitDepth, s.channels)
+                    }
+                    // Navidrome mis-reads Atmos (E-AC-3 JOC) .m4a as stereo AAC. One stream header settles whether the tags are
+                    // right; only when it disagrees are the others probed (each probe is a request).
+                    val first = songs.first()
+                    val firstStream = first.streamUri?.takeIf { first.codec == "AAC" || first.codec == "ALAC" }
+                    val firstReal = firstStream?.let { probe.probeRemote(first.id, it) }
+                    if (firstReal != null && firstReal.codec != first.codec) {
+                        formats.value = AudioFormat.tags(songs.take(40).map { s ->
+                            async { s.streamUri?.let { probe.probeRemote(s.id, it) } }
+                        }.awaitAll().filterNotNull().ifEmpty { remoteFormats })
+                        return@launch
                     }
                     formats.value = AudioFormat.tags(remoteFormats)
                 }

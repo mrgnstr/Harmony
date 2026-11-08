@@ -7,7 +7,11 @@ import android.media.MediaFormat
 import android.provider.MediaStore
 import com.mrgnstr.harmony.core.model.AudioFormat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.media.MediaDataSource
+import android.net.Uri
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,54 +31,92 @@ class AudioFormatProbe @Inject constructor(@ApplicationContext private val conte
         return withContext(Dispatchers.IO) { runCatching { read(songId) }.getOrNull() }?.also { cache[songId] = it }
     }
 
+    /**
+     * A remote song's real format from the first bytes of its stream, for files whose server tags are unreliable: Navidrome reads
+     * an Atmos (E-AC-3 JOC) .m4a as stereo 16-bit with no codec. Null when the header can't be read (moov at the end, offline);
+     * the caller then keeps the server's figures.
+     */
+    suspend fun probeRemote(songId: Long, streamUrl: String): AudioFormat? {
+        cache[songId]?.let { return it }
+        return withContext(Dispatchers.IO) { runCatching { readRemote(streamUrl) }.getOrNull() }?.also { cache[songId] = it }
+    }
+
+    private fun readRemote(streamUrl: String): AudioFormat? {
+        val conn = URL(streamUrl).openConnection() as HttpURLConnection
+        val head = try {
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 8_000
+            conn.setRequestProperty("Range", "bytes=0-${HEAD_BYTES - 1}")
+            if (conn.responseCode !in 200..299) return null
+            conn.inputStream.use { it.readHead() }
+        } finally { conn.disconnect() }
+        if (head.isEmpty()) return null
+        // The sample entry is near the start even when `moov` is too big for [head] (the extractor then finds no track).
+        HeaderParser.mp4Eac3(head)?.let { (joc, channels, rate) ->
+            return AudioFormat(if (joc) AudioFormat.DOLBY_ATMOS else "E-AC-3", false, rate, 0, channels, 0)
+        }
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(BytesDataSource(head))
+            return describe(extractor, null, head) { -1L }
+        } finally {
+            extractor.release()
+        }
+    }
+
     private fun read(songId: Long): AudioFormat? {
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(context, uri, null)
-            val format = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
-                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true } ?: return null
-            val mime = format.getString(MediaFormat.KEY_MIME)!!
-            var rate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
-            // "bits-per-sample" (KEY_BITS_PER_SAMPLE, API 33) is only filled in by some extractors.
-            var bits = if (format.containsKey("bits-per-sample")) format.getInteger("bits-per-sample") else 0
-            if (bits == 0 && mime == "audio/raw" && format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                bits = when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
-                    android.media.AudioFormat.ENCODING_PCM_8BIT -> 8
-                    android.media.AudioFormat.ENCODING_PCM_FLOAT -> 32
-                    else -> 16
-                }
-            }
-            // Containers whose header states depth/rate exactly: read it ourselves, which also works below API 33.
-            val head = if (mime == "audio/flac" || mime == "audio/raw" || mime.startsWith("audio/eac3")) {
-                context.contentResolver.openInputStream(uri)?.use { it.readHead() }
-            } else null
-            var codec = AudioFormat.codecName(mime)
-            if (head != null) {
-                when (mime) {
-                    "audio/flac" -> HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b }
-                    "audio/raw" -> {
-                        // Some Android versions hand FLAC out as raw PCM (it is decoded by the extractor), so the header decides.
-                        HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b; codec = "FLAC" }
-                        if (codec == "PCM") HeaderParser.wav(head)?.let { (r, b) -> rate = r; bits = b; codec = "WAV" }
-                        if (codec == "PCM" && head.size > 4 && String(head, 0, 4, Charsets.ISO_8859_1) == "FORM") codec = "AIFF"
-                    }
-                    // JOC (Atmos) is only flagged in the MP4 `dec3` box; when the box can't be found, E-AC-3 counts as Atmos as before.
-                    else -> if (HeaderParser.eac3Joc(head) ?: true) codec = AudioFormat.DOLBY_ATMOS
-                }
-            }
-            val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
-            // Lossy bitrate: the header's figure when the extractor has one, else the file's average (size over duration).
-            var kbps = if (format.containsKey(MediaFormat.KEY_BIT_RATE)) format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000 else 0
-            if (kbps <= 0 && format.containsKey(MediaFormat.KEY_DURATION)) {
-                val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-                val us = format.getLong(MediaFormat.KEY_DURATION)
-                if (size > 0 && us > 0) kbps = (size * 8_000L / us).toInt()
-            }
-            return AudioFormat(codec, AudioFormat.isLossless(mime), rate, bits, channels, kbps)
+            return describe(extractor, uri, null) { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L }
         } finally {
             extractor.release()
         }
+    }
+
+    /** [knownHead] is the file's start when already in memory (remote); otherwise it is read from the local file at [uri] when needed. */
+    private fun describe(extractor: MediaExtractor, uri: Uri?, knownHead: ByteArray?, fileSize: () -> Long): AudioFormat? {
+        val format = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
+            .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true } ?: return null
+        val mime = format.getString(MediaFormat.KEY_MIME)!!
+        var rate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
+        // "bits-per-sample" (KEY_BITS_PER_SAMPLE, API 33) is only filled in by some extractors.
+        var bits = if (format.containsKey("bits-per-sample")) format.getInteger("bits-per-sample") else 0
+        if (bits == 0 && mime == "audio/raw" && format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+            bits = when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
+                android.media.AudioFormat.ENCODING_PCM_8BIT -> 8
+                android.media.AudioFormat.ENCODING_PCM_FLOAT -> 32
+                else -> 16
+            }
+        }
+        // Containers whose header states depth/rate exactly: read it ourselves, which also works below API 33.
+        val head = if (mime == "audio/flac" || mime == "audio/raw" || mime.startsWith("audio/eac3")) {
+            knownHead ?: context.contentResolver.openInputStream(uri!!)?.use { it.readHead() }
+        } else null
+        var codec = AudioFormat.codecName(mime)
+        if (head != null) {
+            when (mime) {
+                "audio/flac" -> HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b }
+                "audio/raw" -> {
+                    // Some Android versions hand FLAC out as raw PCM (it is decoded by the extractor), so the header decides.
+                    HeaderParser.flac(head)?.let { (r, b) -> rate = r; bits = b; codec = "FLAC" }
+                    if (codec == "PCM") HeaderParser.wav(head)?.let { (r, b) -> rate = r; bits = b; codec = "WAV" }
+                    if (codec == "PCM" && head.size > 4 && String(head, 0, 4, Charsets.ISO_8859_1) == "FORM") codec = "AIFF"
+                }
+                // JOC (Atmos) is only flagged in the MP4 `dec3` box; when the box can't be found, E-AC-3 counts as Atmos as before.
+                else -> if (HeaderParser.eac3Joc(head) ?: true) codec = AudioFormat.DOLBY_ATMOS
+            }
+        }
+        val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+        // Lossy bitrate: the header's figure when the extractor has one, else the file's average (size over duration).
+        var kbps = if (format.containsKey(MediaFormat.KEY_BIT_RATE)) format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000 else 0
+        if (kbps <= 0 && format.containsKey(MediaFormat.KEY_DURATION)) {
+            val size = fileSize()
+            val us = format.getLong(MediaFormat.KEY_DURATION)
+            if (size > 0 && us > 0) kbps = (size * 8_000L / us).toInt()
+        }
+        return AudioFormat(codec, AudioFormat.isLossless(mime), rate, bits, channels, kbps)
     }
 
     private fun InputStream.readHead(): ByteArray {
@@ -85,6 +127,18 @@ class AudioFormatProbe @Inject constructor(@ApplicationContext private val conte
     }
 
     private companion object { const val HEAD_BYTES = 256 * 1024 }
+}
+
+/** A [MediaDataSource] over the start of a file; reads past the end report end of stream, so a header that needs more fails cleanly. */
+private class BytesDataSource(private val bytes: ByteArray) : MediaDataSource() {
+    override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+        if (position >= bytes.size) return -1
+        val n = minOf(size, bytes.size - position.toInt())
+        System.arraycopy(bytes, position.toInt(), buffer, offset, n)
+        return n
+    }
+    override fun getSize(): Long = -1L
+    override fun close() {}
 }
 
 /** Pure parsers over the first bytes of a file; each returns (sampleRateHz, bitDepth) or null. */
@@ -125,6 +179,21 @@ internal object HeaderParser {
             p += if (dependents > 0) 4 else 3
         }
         return p + 2 <= end && (u(p) and 1) == 1 && u(p + 1) > 0
+    }
+
+    /**
+     * The E-AC-3 sample entry (`ec-3`) of an MP4 in [b]: (Joint Object Coding, channel count, sample rate), or null when the file
+     * has none. The `dec3` box inside it decides JOC, as in [eac3Joc].
+     */
+    fun mp4Eac3(b: ByteArray): Triple<Boolean, Int, Int>? {
+        var at = -1
+        for (i in 4..b.size - 4) if (b[i] == 'e'.code.toByte() && b[i + 1] == 'c'.code.toByte() && b[i + 2] == '-'.code.toByte() && b[i + 3] == '3'.code.toByte()) { at = i; break }
+        // Type(4) is followed by reserved(6), data reference(2), reserved(8), channels(2), sample size(2), reserved(4), rate(16.16).
+        if (at < 4 || at + 4 + 24 > b.size) return null
+        fun u(i: Int) = b[i].toInt() and 0xFF
+        val channels = (u(at + 20) shl 8) or u(at + 21)
+        val rate = (u(at + 28) shl 8) or u(at + 29)
+        return Triple(eac3Joc(b) ?: true, channels, rate)
     }
 
     fun wav(b: ByteArray): Pair<Int, Int>? {

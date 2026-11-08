@@ -81,7 +81,10 @@ class NowPlayingViewModel @Inject constructor(
                 id == null -> null
                 id > 0 -> formatProbe.probe(id)
                 else -> libraryRepository.songs.first().firstOrNull { it.id == id }?.let { s ->
-                    s.codec?.let { AudioFormat(it, s.lossless, s.sampleRateHz, s.bitDepth, s.channels, s.bitRateKbps) }
+                    // Navidrome mis-reads Atmos (E-AC-3 JOC) .m4a as stereo AAC: the stream's own header decides for the MP4 family.
+                    val stream = s.streamUri?.takeIf { s.codec == "AAC" || s.codec == "ALAC" }
+                    val probed = stream?.let { formatProbe.probeRemote(s.id, it) }?.let { f -> if (f.bitRateKbps > 0) f else f.copy(bitRateKbps = s.bitRateKbps) }
+                    probed ?: s.codec?.let { AudioFormat(it, s.lossless, s.sampleRateHz, s.bitDepth, s.channels, s.bitRateKbps) }
                 }
             }?.pill
         }
