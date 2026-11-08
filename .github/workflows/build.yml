@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -40,11 +40,12 @@ jobs:
             echo "::warning::DEBUG_KEYSTORE_BASE64 not set; signing with a throwaway debug key"
           fi
 
+      # gradle.properties pins org.gradle.java.home to a local JDK path; the command line wins over it.
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:testDebugUnitTest
 
       - name: Build release APK
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
