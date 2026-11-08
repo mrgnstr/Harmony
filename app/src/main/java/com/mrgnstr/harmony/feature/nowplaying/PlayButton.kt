@@ -225,7 +225,8 @@ fun MorphingPlayButton(
             if (gather > 0.6f) {
                 LoadingIndicator(
                     Modifier
-                        .size(glyph * 0.76f)
+                        // The indicator draws its shape at about 0.8 of its box; the box is sized so the shape matches the disc the glyph gathers into.
+                        .size(glyph * 1.3f)
                         .then(if (cutOut) Modifier.cutOutOf { handoff } else Modifier.graphicsLayer { alpha = handoff }),
                     color = contentColor,
                 )
