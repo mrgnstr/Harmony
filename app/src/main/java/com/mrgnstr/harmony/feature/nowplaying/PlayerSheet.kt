@@ -196,11 +196,10 @@ fun PlayerSheet(
     // Whether the current drag began with the mini player resting.
     val fromRest = remember { mutableStateOf(false) }
     StatusBarIconsFollowCover(state, coverColors, panelOpen = panel.panel != NowPlayingPanel.None)
-    panel.sheetProgress = { state.visual.coerceIn(0f, 1f) }
     ControlsAutoHide(panel, snap.isPlaying)
     LaunchedEffect(state, panel) {
-        // Collapsed: the next time Now Playing opens it shows the cover.
-        snapshotFlow { state.progress.value < 0.01f && !state.progress.isRunning }.collect { if (it && panel.panel != NowPlayingPanel.None) panel.reset() }
+        // Collapsed: the lyrics stay open for next time; the queue does not.
+        snapshotFlow { state.progress.value < 0.01f && !state.progress.isRunning }.collect { if (it && panel.panel == NowPlayingPanel.Queue) panel.reset() }
     }
 
     // Back closes the player; the gesture scrubs the morph and lets go with its own spring.
@@ -305,24 +304,31 @@ fun PlayerSheet(
         // blur, the controls) travels down with the cover and is cropped into it as the cover shrinks, instead of just fading.
         val riding: GraphicsLayerScope.() -> Unit = {
             val p = clamped()
-            val s = lerp(miniArt / fullArt, 1f, p)
+            // In a panel the scene does not shrink onto the cover: it stays full screen, moves down with the pill's top edge and is clipped by it (k = 1).
+            val k = panel.open.value
+            val s = lerp(lerp(miniArt / fullArt, 1f, p), 1f, k)
             transformOrigin = TransformOrigin(0f, fullArtY / screenH)
             scaleX = s; scaleY = s
-            translationX = coverLeft(p)
-            translationY = coverTop(p) - fullArtY + sag()
+            translationX = lerp(coverLeft(p), 0f, k)
+            // In a panel it is pinned to the pill's top edge as it rises, like the mini player's own row.
+            translationY = lerp(coverTop(p) - fullArtY, lerp(restingTop, 0f, p), k) + sag()
             // The cover's small radius at rest; open, the display's own radius at each corner (divided by the scale: the layer is scaled).
             val rest = MiniArtRadius.toPx()
             fun r(display: Float) = CornerRadius(lerp(rest, display, p) * cornerKeep.value / s)
             shape = RectShape(
                 RoundRect(
-                    left = 0f, top = fullArtY * (1f - p),
-                    right = fullArt + p * (screenW - fullArt), bottom = fullArtY + fullArt + p * (screenH - fullArtY - fullArt),
+                    left = 0f, top = lerp(fullArtY * (1f - p), 0f, k),
+                    right = lerp(fullArt + p * (screenW - fullArt), screenW, k),
+                    bottom = lerp(fullArtY + fullArt + p * (screenH - fullArtY - fullArt), screenH, k),
                     topLeftCornerRadius = r(corners.tl), topRightCornerRadius = r(corners.tr),
                     bottomRightCornerRadius = r(corners.br), bottomLeftCornerRadius = r(corners.bl),
                 ),
             )
             clip = true
         }
+
+        // The scene fades as it is cropped; slower in a panel, where it is the whole screen going into the pill.
+        val sceneAlpha: () -> Float = { fade(clamped() / lerp(0.15f, 0.6f, panel.open.value)) }
 
         val drag = rememberDraggableState { delta ->
             // Having pulled the player up at any point in this drag rules the swipe-away out, however it ends.
@@ -380,7 +386,8 @@ fun PlayerSheet(
                         .padding(start = MiniArtInset + MiniArt + 12.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    // In a panel the full player's title travels here instead (until it is composed, this one stays).
+                    Column(Modifier.weight(1f).graphicsLayer { alpha = if (showFull) 1f - panel.open.value else 1f }) {
                         Text(snap.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(snap.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -400,7 +407,7 @@ fun PlayerSheet(
             // Solid ground under the scene, cropped and grown like it: the blur layers are bitmaps or a shader that can end a pixel or
             // two short of the screen edge, and the page behind must never show through there.
             Box(
-                Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(clamped() / 0.15f) }.background(Color.Black),
+                Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() }.background(Color.Black),
             )
 
             // The cover: the mini player's thumbnail grows into the full-width picture.
@@ -416,6 +423,8 @@ fun PlayerSheet(
                         scaleX = s; scaleY = s
                         translationX = coverLeft(p)
                         translationY = coverTop(p) + sag()
+                        // In a panel the cover is drawn by the one further up (the header's); until that is composed, this one stays.
+                        alpha = if (showFull) 1f - panel.open.value else 1f
                         // The radius is set in the layer's own (unscaled) space, so divide the on-screen one by the scale.
                         val radius = lerp(MiniArtRadius.toPx(), 0f, p) / s
                         shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
@@ -448,7 +457,7 @@ fun PlayerSheet(
             Box(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
-                    alpha = fade(clamped() / 0.15f)
+                    alpha = sceneAlpha()
                 },
             ) {
                 Box(
@@ -506,7 +515,7 @@ fun PlayerSheet(
                 }
                 if (panel.visible) {
                     // The lyrics come up from under the cover as it shrinks away (inside the fade above the controls, which stays put).
-                    Box(Modifier.fillMaxSize().graphicsLayer(riding)) {
+                    Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() }) {
                         LyricsView(
                             lyrics, progress, snap.isPlaying, viewModel::positionNow, panel, listTop - listOverlap, fileAccess, { (1f - panel.q()) * (fullArtY + fullArt - listTop + listOverlap).coerceAtLeast(0f) }, viewModel::seekTo,
                             Modifier
@@ -523,12 +532,14 @@ fun PlayerSheet(
                             .graphicsLayer {
                                 val p = clamped()
                                 val q = panel.q()
-                                val s = lerp(lerp(miniArt / fullArt, 1f, p), headerSize / fullArt, q)
+                                // Between the header and the mini player the cover moves in a straight line.
+                                val hp = lerp(miniArt, headerSize, p)
+                                val s = lerp(lerp(miniArt / fullArt, 1f, p), hp / fullArt, q)
                                 transformOrigin = TransformOrigin(0f, 0f)
                                 scaleX = s; scaleY = s
-                                translationX = lerp(coverLeft(p), headerX, q)
-                                translationY = lerp(coverTop(p), headerY, q) + sag()
-                                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), PanelCoverRadius.toPx(), q) / s
+                                translationX = lerp(coverLeft(p), lerp(miniArtX, headerX, p), q)
+                                translationY = lerp(coverTop(p), lerp(miniArtY, headerY, p), q) + sag()
+                                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
                                 shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
                                 clip = true
                             }
@@ -562,11 +573,19 @@ fun PlayerSheet(
                         }
                     }
                 }
-                Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade((clamped() - 0.2f) / 0.8f) }) {
+                // The title is on its own layer: in a panel it goes to the mini player, while the controls fade with the scene.
+                Box(Modifier.fillMaxSize().graphicsLayer(riding)) {
                     CompositionLocalProvider(LocalCoverColors provides coverColors) {
                         PlayingTitle(
                             snap, favourite, viewModel::toggleFavourite, panel,
                             headerShift = headerY + with(density) { PanelCoverSize.toPx() / 2f - TitleRowHeight.toPx() / 2f } - controlsTop,
+                            sheetProgress = clamped,
+                            miniShift = androidx.compose.ui.geometry.Offset(
+                                headerX + headerSize + with(density) { PanelHeaderGap.toPx() } - (miniArtX + miniArt + with(density) { 12.dp.toPx() }),
+                                headerY + headerSize / 2f - miniH / 2f,
+                            ),
+                            miniTitleSize = MaterialTheme.typography.titleMediumEmphasized.fontSize,
+                            miniArtistSize = MaterialTheme.typography.bodySmall.fontSize,
                             artists = artists,
                             onOpenAlbum = {
                                 if (snap.albumId != 0L) {
@@ -575,8 +594,16 @@ fun PlayerSheet(
                                 }
                             },
                             onOpenArtist = { name -> openArtist?.invoke(name); state.collapse() },
-                            modifier = Modifier.offset { IntOffset(0, controlsTop.roundToInt()) },
+                            // Outside a panel it fades in with the scene; in one it is on its way to the mini player and stays.
+                            // The alpha layer goes after the offset: before it, the layer's bounds would be where the title is not, and cut it off.
+                            modifier = Modifier
+                                .offset { IntOffset(0, controlsTop.roundToInt()) }
+                                .graphicsLayer { alpha = lerp(fade((clamped() - 0.2f) / 0.8f), 1f, panel.open.value) },
                         )
+                    }
+                }
+                Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade((clamped() - 0.2f) / 0.8f) }) {
+                    CompositionLocalProvider(LocalCoverColors provides coverColors) {
                         FullPlayerControls(
                             snap, progress, queue, favourite, viewModel, panel,
                             Modifier

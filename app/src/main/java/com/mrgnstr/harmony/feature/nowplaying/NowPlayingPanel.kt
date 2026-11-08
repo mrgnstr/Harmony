@@ -100,11 +100,8 @@ class PanelState internal constructor(initial: NowPlayingPanel) {
     var showTranslation by mutableStateOf(true)
     var showPronunciation by mutableStateOf(true)
 
-    /** The sheet's own progress; the panel gives way as the player collapses, so the cover finds its way back to the mini player. */
-    internal var sheetProgress: () -> Float = { 1f }
-
-    /** [open] as drawn: scaled down while the sheet is not fully open. */
-    fun q(): Float = open.value * ((sheetProgress() - 0.7f) / 0.3f).coerceIn(0f, 1f)
+    /** How far the panel is open. The sheet's collapse does not touch it: it stays open (and is remembered) down to the mini player. */
+    fun q(): Float = open.value
 
     /** Composed while it is on screen or on its way. */
     val visible: Boolean get() = panel != NowPlayingPanel.None || open.value > 0f
@@ -188,6 +185,11 @@ internal fun PlayingTitle(
     onFavourite: () -> Unit,
     panel: PanelState,
     headerShift: Float,
+    /** Where the text goes between the panel and the mini player: how far the sheet is open, and the offset (px) from the panel's place to the pill's at 0. */
+    sheetProgress: () -> Float,
+    miniShift: androidx.compose.ui.geometry.Offset,
+    miniTitleSize: androidx.compose.ui.unit.TextUnit,
+    miniArtistSize: androidx.compose.ui.unit.TextUnit,
     artists: List<String>,
     onOpenAlbum: () -> Unit,
     onOpenArtist: (String) -> Unit,
@@ -197,14 +199,23 @@ internal fun PlayingTitle(
     // It lags behind the panel: it travels further than the cover's bottom edge, which it must not run into on the way up.
     val q = panel.q().let { it * it }
     val big = MaterialTheme.typography.headlineSmallEmphasized
-    val title = big.copy(fontWeight = FontWeight.Bold, fontSize = lerp(big.fontSize, 20.sp, q), lineHeight = lerp(big.lineHeight, 26.sp, q))
+    // In a panel the text also shrinks to the mini player's sizes as the sheet closes (a size, so it recomposes with the sheet).
+    val sp = sheetProgress()
+    val panelTitle = lerp(miniTitleSize, 20.sp, sp)
+    val panelArtist = lerp(miniArtistSize, 16.sp, sp)
+    val title = big.copy(fontWeight = FontWeight.Bold, fontSize = lerp(big.fontSize, panelTitle, q), lineHeight = lerp(big.lineHeight, panelTitle * 1.3f, q))
     val sub = MaterialTheme.typography.titleMedium
-    val artist = sub.copy(fontSize = lerp(sub.fontSize, 16.sp, q), lineHeight = lerp(sub.lineHeight, 22.sp, q))
+    val artist = sub.copy(fontSize = lerp(sub.fontSize, panelArtist, q), lineHeight = lerp(sub.lineHeight, panelArtist * 1.375f, q))
     Row(
         modifier
             .fillMaxWidth()
             .height(TitleRowHeight)
-            .graphicsLayer { translationY = headerShift * panel.q().let { it * it } }
+            .graphicsLayer {
+                val q = panel.q()
+                val away = (1f - sheetProgress()) * q
+                translationY = headerShift * q * q - away * miniShift.y
+                translationX = -away * miniShift.x
+            }
             .padding(horizontal = PanelSide),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -227,7 +238,10 @@ internal fun PlayingTitle(
                 }
             }
         }
-        FavouriteToggle(favourite, onFavourite)
+        // The heart has no place in the mini player: it fades as the title goes there.
+        Box(Modifier.graphicsLayer { alpha = (1f - (1f - sheetProgress()) * panel.q() * 2f).coerceIn(0f, 1f) }) {
+            FavouriteToggle(favourite, onFavourite)
+        }
     }
 }
 
