@@ -106,6 +106,9 @@ enum class ArtistReleaseShelf(val title: String) {
 
 enum class AlbumReleaseShelf { OtherVersions, MoreByArtist }
 
+/** The artist lists that open as a full page from a shelf; the page's reference is the playlist id or the artist's name. */
+enum class ArtistListKind { Favourites, Featured, Similar }
+
 enum class HomeShelf(val title: String) {
     RecentlyPlayed("Recently Played"),
     FavouriteAlbums("Favourite Albums"),

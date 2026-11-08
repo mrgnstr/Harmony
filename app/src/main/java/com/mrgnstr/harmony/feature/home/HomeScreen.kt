@@ -2,6 +2,17 @@ package com.mrgnstr.harmony.feature.home
 
 import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import com.mrgnstr.harmony.core.designsystem.ArtworkImage
+import com.mrgnstr.harmony.core.designsystem.components.ArtistGridPage
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfItem
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfTileWidth
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfTile
+import com.mrgnstr.harmony.core.model.Artist
+import java.io.File
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
@@ -73,13 +84,14 @@ data class HomeUiState(
     val favouriteSongs: List<Song> = emptyList(),
     val allFavouriteSongs: List<Song> = emptyList(),
     val favouriteAlbums: List<Album> = emptyList(),
+    val favouriteArtists: List<Artist> = emptyList(),
     val radioStations: List<RadioStation> = emptyList(),
     val albums: List<Album> = emptyList(),
     val playingId: Long? = null,
     val loading: Boolean = true,
     val hasLibrary: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = recentAlbums.isEmpty() && favouriteSongs.isEmpty() && favouriteAlbums.isEmpty() && radioStations.isEmpty()
+    val isEmpty: Boolean get() = recentAlbums.isEmpty() && favouriteSongs.isEmpty() && favouriteAlbums.isEmpty() && favouriteArtists.isEmpty() && radioStations.isEmpty()
 }
 
 @HiltViewModel
@@ -93,10 +105,13 @@ class HomeViewModel @Inject constructor(
     val state: StateFlow<HomeUiState> = combine(
         combine(library.albums, library.songs, library.syncState) { a, s, sync -> Triple(a, s, sync) },
         combine(history.entries, history.playStats) { e, stats -> e to stats },
-        combine(favourites.entries, favourites.albums) { fe, fa -> fe to fa },
+        combine(favourites.entries, favourites.albums, favourites.artists, library.artists) { fe, fa, names, artists ->
+            val byName = artists.associateBy { it.name }
+            Triple(fe, fa, names.mapNotNull { byName[it] })
+        },
         navidrome.radios,
         player.state,
-    ) { (albums, songs, sync), (played, playStats), (favEntries, favAlbumKeys), radios, playback ->
+    ) { (albums, songs, sync), (played, playStats), (favEntries, favAlbumKeys, favArtists), radios, playback ->
         val byKey = albums.associateBy { AlbumKey(it.id, it.title) }
         val recent = LinkedHashSet<Album>(RecentAlbumsLimit)
         for (i in played.lastIndex downTo 0) {
@@ -123,6 +138,7 @@ class HomeViewModel @Inject constructor(
             favouriteSongs = allFavSongs.take(FavouriteSongsLimit),
             allFavouriteSongs = allFavSongs,
             favouriteAlbums = favAlbums,
+            favouriteArtists = favArtists,
             radioStations = radios,
             albums = albums,
             playingId = playback.mediaId?.toLongOrNull(),
@@ -152,6 +168,7 @@ fun HomeRoute(
     onOpenArtist: (String) -> Unit,
     onOpenPlaylist: (Long) -> Unit,
     onOpenShelf: (HomeShelf) -> Unit,
+    onOpenFavouriteArtists: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -218,6 +235,26 @@ fun HomeRoute(
                     onMore = { onOpenShelf(HomeShelf.FavouriteAlbums) },
                     onOpenAlbum = onOpenAlbum,
                 )
+                if (state.favouriteArtists.isNotEmpty()) {
+                    item(key = "fav-artists:heading", contentType = "heading") {
+                        SectionHeading("Favourite Artists", onMore = onOpenFavouriteArtists)
+                    }
+                    item(key = "fav-artists:row", contentType = "shelf") {
+                        val sides = LocalSideInsets.current
+                        val rowState = rememberLazyListState()
+                        LazyRow(
+                            modifier = Modifier.bleedSides(sides),
+                            state = rowState,
+                            flingBehavior = rememberSnapFlingBehavior(rowState, SnapPosition.Start),
+                            contentPadding = sides.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(state.favouriteArtists, key = { "fav-artist:${it.name}" }, contentType = { "artist" }) { artist ->
+                                ArtistShelfTile(ArtistShelfItem(artist.name, artist = artist), onClick = { onOpenArtist(artist.name) }, modifier = itemMotion().width(ArtistShelfTileWidth))
+                            }
+                        }
+                    }
+                }
                 if (state.radioStations.isNotEmpty()) {
                     item(key = "radio:heading", contentType = "heading") {
                         SectionHeading("Internet Radio")
@@ -299,5 +336,22 @@ fun HomeShelfRoute(
         loaded = !state.loading,
         onBack = onBack,
         onOpenAlbum = onOpenAlbum,
+    )
+}
+
+@Composable
+fun FavouriteArtistsRoute(
+    onBack: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+    viewModel: HomeViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    ArtistGridPage(
+        title = "Favourite Artists",
+        subtitle = "Home",
+        artists = remember(state.favouriteArtists) { state.favouriteArtists.map { ArtistShelfItem(it.name, artist = it) } },
+        loaded = !state.loading,
+        onBack = onBack,
+        onOpenArtist = onOpenArtist,
     )
 }

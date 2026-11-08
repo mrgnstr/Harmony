@@ -2,6 +2,7 @@ package com.mrgnstr.harmony.app
 
 import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
 import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
+import com.mrgnstr.harmony.core.model.ArtistListKind
 import com.mrgnstr.harmony.core.model.HomeShelf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -29,6 +30,7 @@ sealed interface Dest {
     data class ArtistInfo(val name: String, val accent: Int? = null) : Dest
     data class ArtistReleases(val name: String, val shelf: ArtistReleaseShelf, val accent: Int? = null) : Dest
     data class AlbumShelf(val albumId: Long, val title: String, val shelf: AlbumReleaseShelf, val accent: Int? = null) : Dest
+    data class ArtistList(val kind: ArtistListKind, val ref: String = "", val accent: Int? = null) : Dest
     data class HomeShelfDest(val shelf: HomeShelf) : Dest
     data class LibraryAlbums(val accent: Int? = null) : Dest
     data class LibrarySongs(val accent: Int? = null) : Dest
@@ -90,6 +92,7 @@ private fun Dest.encode(): List<Any> = when (this) {
     is Dest.ArtistInfo -> listOf("artistInfo", name) + listOfNotNull(accent)
     is Dest.ArtistReleases -> listOf("artistReleases", name, shelf.name) + listOfNotNull(accent)
     is Dest.AlbumShelf -> listOf("albumShelf", albumId, title, shelf.name) + listOfNotNull(accent)
+    is Dest.ArtistList -> listOf("artistList", kind.name, ref) + listOfNotNull(accent)
     is Dest.HomeShelfDest -> listOf("homeShelf", shelf.name)
     is Dest.LibraryAlbums -> listOf("libraryAlbums") + listOfNotNull(accent)
     is Dest.LibrarySongs -> listOf("librarySongs") + listOfNotNull(accent)
@@ -108,6 +111,7 @@ private fun decodeDest(parts: List<Any>): Dest? = runCatching {
         "artistInfo" -> Dest.ArtistInfo(parts[1] as String, parts.getOrNull(2) as? Int)
         "artistReleases" -> Dest.ArtistReleases(parts[1] as String, ArtistReleaseShelf.valueOf(parts[2] as String), parts.getOrNull(3) as? Int)
         "albumShelf" -> Dest.AlbumShelf(parts[1] as Long, parts[2] as String, AlbumReleaseShelf.valueOf(parts[3] as String), parts.getOrNull(4) as? Int)
+        "artistList" -> Dest.ArtistList(ArtistListKind.valueOf(parts[1] as String), parts[2] as String, parts.getOrNull(3) as? Int)
         "homeShelf" -> Dest.HomeShelfDest(HomeShelf.valueOf(parts[1] as String))
         "libraryAlbums" -> Dest.LibraryAlbums(parts.getOrNull(1) as? Int)
         "librarySongs" -> Dest.LibrarySongs(parts.getOrNull(1) as? Int)

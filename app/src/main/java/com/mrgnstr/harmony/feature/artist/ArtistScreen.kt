@@ -40,6 +40,7 @@ import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
+import com.mrgnstr.harmony.core.model.SimilarArtistRef
 import com.mrgnstr.harmony.core.model.Song
 
 @Composable
@@ -50,6 +51,7 @@ fun ArtistRoute(
     onAllSongs: (Int?) -> Unit,
     onInfo: (Int?) -> Unit,
     onOpenShelf: (ArtistReleaseShelf, Int?) -> Unit,
+    onSimilar: (Int?) -> Unit,
     viewModel: ArtistViewModel = hiltViewModel<ArtistViewModel, ArtistViewModel.Factory>(key = "artist:$name", creationCallback = { it.create(name) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -90,23 +92,13 @@ fun ArtistRoute(
                     }
                     val similar = state.remoteExtra?.similarArtists.orEmpty()
                     if (similar.isNotEmpty()) {
-                        item("similar:heading", contentType = "heading") { SectionHeading("Similar Artists") }
+                        item("similar:heading", contentType = "heading") { SectionHeading("Similar Artists", onMore = { onSimilar(state.accent) }) }
                         item("similar:row", contentType = "shelf") {
                             val openArtist = LocalOpenArtist.current
                             val sides = LocalSideInsets.current
                             LazyRow(Modifier.bleedSides(sides), contentPadding = sides.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(similar, key = { "sim:${it.id}:${it.name}" }) { sim ->
-                                    ArtworkTile(
-                                        title = sim.name,
-                                        subtitle = sim.albumCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" },
-                                        onClick = { openArtist?.invoke(sim.name) },
-                                        circular = true,
-                                        modifier = Modifier.width(120.dp),
-                                    ) { artMod ->
-                                        Box(artMod.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
-                                            SymbolIcon(Symbols.Artist, null, size = 36.dp, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                                        }
-                                    }
+                                    ArtistShelfTile(shelfItem(sim), { openArtist?.invoke(sim.name) }, Modifier.width(ArtistShelfTileWidth))
                                 }
                             }
                         }
@@ -340,4 +332,20 @@ fun ArtistReleasesRoute(
     val state by viewModel.state.collectAsStateWithLifecycle()
     PageColorSource(state.accent?.let { ColorSource.Seed(it) })
     AlbumGridPage(shelf.title, name, state.releases(shelf), state.loaded, onBack, onOpenAlbum)
+}
+
+private fun shelfItem(sim: SimilarArtistRef) =
+    ArtistShelfItem(sim.name, sim.albumCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" })
+
+@Composable
+fun SimilarArtistsRoute(
+    name: String, onBack: () -> Unit, onOpenArtist: (String) -> Unit,
+    viewModel: ArtistViewModel = hiltViewModel<ArtistViewModel, ArtistViewModel.Factory>(
+        key = "artist:$name:similar", creationCallback = { it.create(name) },
+    ),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    PageColorSource(state.accent?.let { ColorSource.Seed(it) })
+    val similar = state.remoteExtra?.similarArtists.orEmpty()
+    ArtistGridPage("Similar Artists", name, similar.map(::shelfItem), state.loaded, onBack, onOpenArtist)
 }

@@ -84,7 +84,11 @@ import com.mrgnstr.harmony.core.designsystem.theme.lerp
 import com.mrgnstr.harmony.core.designsystem.theme.rememberColorSourceRegistry
 import com.mrgnstr.harmony.core.device.VisualTier
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.ArtistListKind
 import com.mrgnstr.harmony.feature.artist.ArtistReleasesRoute
+import com.mrgnstr.harmony.feature.artist.SimilarArtistsRoute
+import com.mrgnstr.harmony.feature.home.FavouriteArtistsRoute
+import com.mrgnstr.harmony.feature.library.PlaylistArtistsRoute
 import com.mrgnstr.harmony.feature.album.AlbumShelfRoute
 import com.mrgnstr.harmony.feature.library.LibraryAlbumsRoute
 import com.mrgnstr.harmony.feature.library.LibrarySongsRoute
@@ -113,6 +117,7 @@ private fun TabDestination.initialColorSource(): ColorSource {
         is Dest.ArtistSongs -> dest.accent
         is Dest.ArtistReleases -> dest.accent
         is Dest.AlbumShelf -> dest.accent
+        is Dest.ArtistList -> dest.accent
         is Dest.LibraryAlbums -> dest.accent
         is Dest.LibrarySongs -> dest.accent
         else -> null
@@ -224,6 +229,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                         onOpenArtist = openArtist,
                         onOpenPlaylist = openPlaylist,
                         onOpenShelf = { nav.push(Dest.HomeShelfDest(it)) },
+                        onOpenFavouriteArtists = { nav.push(Dest.ArtistList(ArtistListKind.Favourites)) },
                     )
                     Tab.Library -> LibraryRoute(
                         onOpenSettings = openSettings, onOpenGallery = openGallery,
@@ -259,7 +265,8 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                     onOpenAlbum = openAlbum,
                     onAllSongs = { accent -> nav.push(Dest.ArtistSongs(artist.name, accent)) },
                     onInfo = { accent -> nav.push(Dest.ArtistInfo(artist.name, accent)) },
-                    onOpenShelf = { shelf, accent -> nav.push(Dest.ArtistReleases(artist.name, shelf, accent)) })
+                    onOpenShelf = { shelf, accent -> nav.push(Dest.ArtistReleases(artist.name, shelf, accent)) },
+                    onSimilar = { accent -> nav.push(Dest.ArtistList(ArtistListKind.Similar, artist.name, accent)) })
             }
             entry<Dest.ArtistSongs> { ArtistSongsRoute(it.name, onBack = back) }
             entry<Dest.ArtistInfo> { ArtistInfoRoute(it.name, onBack = back) }
@@ -271,13 +278,23 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                 AlbumShelfRoute(collection.albumId, collection.title, collection.shelf, onBack = back,
                     onOpenAlbum = openAlbum)
             }
+            entry<Dest.ArtistList> { list ->
+                when (list.kind) {
+                    ArtistListKind.Favourites -> FavouriteArtistsRoute(onBack = back, onOpenArtist = openArtist)
+                    ArtistListKind.Featured -> PlaylistArtistsRoute(list.ref.toLong(), onBack = back, onOpenArtist = openArtist)
+                    ArtistListKind.Similar -> SimilarArtistsRoute(list.ref, onBack = back, onOpenArtist = openArtist)
+                }
+            }
             entry<Dest.HomeShelfDest> { collection ->
                 HomeShelfRoute(collection.shelf, onBack = back, onOpenAlbum = openAlbum)
             }
             entry<Dest.LibraryAlbums> { LibraryAlbumsRoute(onBack = back, onOpenAlbum = openAlbum) }
             entry<Dest.LibrarySongs> { LibrarySongsRoute(onBack = back) }
             entry<Dest.Genre> { GenreRoute(it.name, onBack = back, onOpenAlbum = openAlbum) }
-            entry<Dest.Playlist> { PlaylistRoute(it.playlistId, onBack = back, onOpenAlbum = openAlbum, onOpenArtist = openArtist) }
+            entry<Dest.Playlist> { playlist ->
+                PlaylistRoute(playlist.playlistId, onBack = back, onOpenAlbum = openAlbum, onOpenArtist = openArtist,
+                    onOpenArtists = { accent -> nav.push(Dest.ArtistList(ArtistListKind.Featured, playlist.playlistId.toString(), accent)) })
+            }
         }
     }
     // Tab in the entry's identity and metadata (for the tab slide); the entry key is what pages claim colours under.

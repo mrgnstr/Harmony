@@ -50,7 +50,10 @@ import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.blur.chromeSource
 import com.mrgnstr.harmony.core.designsystem.blur.rememberChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.components.AddSongsSheet
-import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
+import com.mrgnstr.harmony.core.designsystem.components.ArtistGridPage
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfItem
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfTileWidth
+import com.mrgnstr.harmony.core.designsystem.components.ArtistShelfTile
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
 import com.mrgnstr.harmony.core.designsystem.components.CoverFrame
 import com.mrgnstr.harmony.core.designsystem.components.DetailTopBar
@@ -86,6 +89,7 @@ fun PlaylistRoute(
     onBack: () -> Unit,
     onOpenAlbum: (Album) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenArtists: (Int?) -> Unit,
     viewModel: PlaylistDetailViewModel = hiltViewModel<PlaylistDetailViewModel, PlaylistDetailViewModel.Factory>(
         key = "playlist:$playlistId",
         creationCallback = { it.create(playlistId) },
@@ -145,7 +149,7 @@ fun PlaylistRoute(
                                 modifier = itemMotion(),
                             )
                         }
-                        if (state.featuredArtists.isNotEmpty()) artistShelf(state.featuredArtists, onOpenArtist)
+                        if (state.featuredArtists.isNotEmpty()) artistShelf(state.featuredArtists, onOpenArtist) { onOpenArtists(state.accent) }
                     }
                 }
             }
@@ -256,27 +260,37 @@ private fun EmptyHint() {
     )
 }
 
-private fun LazyListScope.artistShelf(artists: List<Artist>, onOpenArtist: (String) -> Unit) {
-    item(key = "artists:heading", contentType = "heading") { SectionHeading("Featured Artists") }
+private fun LazyListScope.artistShelf(artists: List<Artist>, onOpenArtist: (String) -> Unit, onMore: () -> Unit) {
+    item(key = "artists:heading", contentType = "heading") { SectionHeading("Featured Artists", onMore = onMore) }
     item(key = "artists:row", contentType = "shelf") {
         // Scrolls out to the display edges; rests 16 dp in from the content's side.
         val sides = LocalSideInsets.current
         LazyRow(Modifier.bleedSides(sides), contentPadding = sides.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(artists, key = { "artist:${it.name}" }, contentType = { "artist" }) { artist ->
-                var menuOpen by remember { mutableStateOf(false) }
-                var menuInitialized by remember { mutableStateOf(false) }
-                ArtworkTile(
-                    artist.name, null, { onOpenArtist(artist.name) },
-                    Modifier.width(ShelfTileWidth),
-                    circular = true,
-                    onLongClick = { menuInitialized = true; menuOpen = true },
-                    menu = { if (menuInitialized) ArtistContextMenu(artist.name, menuOpen, { menuOpen = false }) },
-                ) { cover ->
-                    val custom = artist.imagePath
-                    if (custom != null) AsyncImage(File(custom), null, cover, contentScale = ContentScale.Crop)
-                    else ArtworkImage(artist.artSongId, artist.artAlbumId, cover)
-                }
+                ArtistShelfTile(ArtistShelfItem(artist.name, artist = artist), { onOpenArtist(artist.name) }, Modifier.width(ArtistShelfTileWidth))
             }
         }
     }
+}
+
+@Composable
+fun PlaylistArtistsRoute(
+    playlistId: Long,
+    onBack: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+    viewModel: PlaylistDetailViewModel = hiltViewModel<PlaylistDetailViewModel, PlaylistDetailViewModel.Factory>(
+        key = "playlist:$playlistId:artists",
+        creationCallback = { it.create(playlistId) },
+    ),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    PageColorSource(state.accent?.let { ColorSource.Seed(it) })
+    ArtistGridPage(
+        title = "Featured Artists",
+        subtitle = state.playlist?.name ?: if (playlistId == FAVOURITES_PLAYLIST_ID) "Favourite Songs" else "Playlist",
+        artists = remember(state.featuredArtists) { state.featuredArtists.map { ArtistShelfItem(it.name, artist = it) } },
+        loaded = state.loaded,
+        onBack = onBack,
+        onOpenArtist = onOpenArtist,
+    )
 }
