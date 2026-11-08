@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.mrgnstr.harmony.feature.artist
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -39,8 +40,8 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
 import com.mrgnstr.harmony.core.model.Album
-import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
 import com.mrgnstr.harmony.core.model.Artist
+import com.mrgnstr.harmony.core.model.ArtistReleaseShelf
 import com.mrgnstr.harmony.core.model.SimilarArtistRef
 import com.mrgnstr.harmony.core.model.Song
 
@@ -278,42 +279,63 @@ fun ArtistInfoRoute(
     viewModel: ArtistViewModel = hiltViewModel<ArtistViewModel, ArtistViewModel.Factory>(key = "artist:$name:info", creationCallback = { it.create(name) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val lastFm by viewModel.lastFm.collectAsStateWithLifecycle()
     PageColorSource(state.accent?.let { ColorSource.Seed(it) })
-    TopBarScaffold("Artist Info", subtitle = name, onBack = onBack) {
+    TopBarScaffold(name, onBack = onBack) {
+        val uriHandler = LocalUriHandler.current
         LazyColumn(contentPadding = LocalSideInsets.current.padding(horizontal = 20.dp, top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { Text(name, style = MaterialTheme.typography.headlineMediumEmphasized) }
-            state.remoteExtra?.biography?.takeIf { it.isNotBlank() }?.let { bio ->
-                item {
-                    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Biography", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(bio, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-            }
-            item { Text("In Your Library", style = MaterialTheme.typography.titleLarge) }
             val years = state.songs.map { it.year }.filter { it > 0 }
             val minutes = state.songs.sumOf { it.durationMs } / 60_000
-            val facts = listOfNotNull(
+            // Short facts sit two to a row; the long ones get a full row under them.
+            val counts = listOfNotNull(
                 "Songs" to state.songs.size.toString(),
                 "Albums" to state.albums.size.toString(),
                 "Singles & EPs" to state.singles.size.toString(),
                 years.takeIf { it.isNotEmpty() }?.let { "Release years" to (if (it.min() == it.max()) "${it.min()}" else "${it.min()}–${it.max()}") },
                 "Music length" to (if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"),
+            )
+            val details = listOfNotNull(
                 state.songs.mapNotNull { it.genre?.takeIf(String::isNotBlank) }.distinct().takeIf { it.isNotEmpty() }?.let { "Genres" to it.joinToString() },
                 state.remoteExtra?.roles?.takeIf { it.isNotEmpty() }?.let { "Roles" to it.joinToString { r -> r.replaceFirstChar(Char::uppercase) } },
                 state.remoteExtra?.mbzArtistId?.takeIf { it.isNotBlank() }?.let { "MusicBrainz ID" to it },
             )
-            items(facts) { (label, value) ->
+            item {
                 Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp)) {
-                        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(value, style = MaterialTheme.typography.bodyLarge)
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text("In Your Library", style = MaterialTheme.typography.titleMedium)
+                        FlowRow(Modifier.fillMaxWidth(), maxItemsInEachRow = 2, horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            counts.forEach { (label, value) -> InfoFact(label, value, Modifier.weight(1f)) }
+                        }
+                        details.forEach { (label, value) -> InfoFact(label, value, Modifier.fillMaxWidth()) }
+                    }
+                }
+            }
+            // The server's biography for its own artists; Last.fm's (when asked for in Settings) for local ones.
+            val bio = state.remoteExtra?.biography?.takeIf { it.isNotBlank() } ?: lastFm?.text?.takeIf { state.remoteExtra == null }
+            val bioUrl = (state.remoteExtra?.externalUrl ?: lastFm?.url.takeIf { state.remoteExtra == null })?.takeIf { it.isNotBlank() }
+            bio?.let { bio ->
+                item {
+                    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Biography", style = MaterialTheme.typography.titleMedium)
+                            Text(bio, style = MaterialTheme.typography.bodyLarge)
+                            // The server passes on only the short summary from Last.fm; the link is the rest of it.
+                            bioUrl?.let { url ->
+                                TextButton(onClick = { runCatching { uriHandler.openUri(url) } }) { Text("Read more on Last.fm") }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun InfoFact(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

@@ -115,6 +115,10 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
     val scrobbleToServer: StateFlow<Boolean> = settings.scrobbleToServer
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    val lastFmInfo: StateFlow<Boolean> = settings.lastFmInfo
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val lastFmApiKey: StateFlow<String> = settings.lastFmApiKey
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     fun syncServerNow() { viewModelScope.launch { navidrome.syncActiveServer() } }
     fun switchServer(id: Long) { viewModelScope.launch { navidrome.switchActiveAccount(id) } }
@@ -139,6 +143,8 @@ class SettingsViewModel @Inject constructor(
     fun setReplayGainMode(mode: ReplayGainMode) { viewModelScope.launch { settings.setReplayGainMode(mode) } }
     fun setReplayGainPreamp(db: Float) { viewModelScope.launch { settings.setReplayGainPreampDb(db) } }
     fun setScrobbleToServer(enabled: Boolean) { viewModelScope.launch { settings.setScrobbleToServer(enabled) } }
+    fun setLastFmInfo(enabled: Boolean) { viewModelScope.launch { settings.setLastFmInfo(enabled) } }
+    fun setLastFmApiKey(key: String) { viewModelScope.launch { settings.setLastFmApiKey(key) } }
 
     fun triggerScan(fullScan: Boolean) { viewModelScope.launch { navidrome.triggerServerScan(fullScan) } }
     fun createRadioStation(name: String, url: String, homepage: String?) {
@@ -168,6 +174,8 @@ fun SettingsRoute(
     val rgMode by viewModel.replayGainMode.collectAsStateWithLifecycle()
     val rgPreamp by viewModel.replayGainPreampDb.collectAsStateWithLifecycle()
     val scrobble by viewModel.scrobbleToServer.collectAsStateWithLifecycle()
+    val lastFmInfo by viewModel.lastFmInfo.collectAsStateWithLifecycle()
+    val lastFmApiKey by viewModel.lastFmApiKey.collectAsStateWithLifecycle()
 
     var showConnectSheet by remember { mutableStateOf(false) }
     var showQuickConnectAuthorize by remember { mutableStateOf(false) }
@@ -377,6 +385,48 @@ fun SettingsRoute(
                         checked = scrobble,
                         onCheckedChange = viewModel::setScrobbleToServer,
                     )
+                }
+            }
+        }
+
+        // Artist & album info for local music
+        item(key = "info-heading") {
+            SectionHeading("Artist & Album Info")
+        }
+        item(key = "info-card") {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                Column(Modifier.padding(vertical = 8.dp)) {
+                    SwitchSettingRow(
+                        title = "Fetch info from Last.fm",
+                        subtitle = "Biographies and album texts for music on this device. Artist and album names are sent to Last.fm; off by default",
+                        checked = lastFmInfo,
+                        onCheckedChange = viewModel::setLastFmInfo,
+                    )
+                    if (lastFmInfo) {
+                        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                        var key by remember(lastFmApiKey) { mutableStateOf(lastFmApiKey) }
+                        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedTextField(
+                                value = key,
+                                onValueChange = { key = it; viewModel.setLastFmApiKey(it) },
+                                label = { Text("Last.fm API key") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                "Last.fm only answers apps that have a key. A free personal one takes a minute to create.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { runCatching { uriHandler.openUri("https://www.last.fm/api/account/create") } }) {
+                                Text("Create an API key")
+                            }
+                        }
+                    }
                 }
             }
         }

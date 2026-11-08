@@ -52,6 +52,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,6 +84,7 @@ import com.mrgnstr.harmony.core.designsystem.theme.ColorSource
 import com.mrgnstr.harmony.core.designsystem.theme.PageColorSource
 import com.mrgnstr.harmony.core.designsystem.components.FormatGlyph
 import com.mrgnstr.harmony.core.model.Album
+import com.mrgnstr.harmony.core.network.LastFmInfo
 import com.mrgnstr.harmony.core.model.AlbumReleaseShelf
 import com.mrgnstr.harmony.core.designsystem.components.AlbumGridPage
 import com.mrgnstr.harmony.core.model.FormatIcon
@@ -150,7 +153,7 @@ fun AlbumRoute(
                     // Composing the rest while the page is still flying in costs frames; it follows once the transition has settled.
                     if (settled) {
                         trackList(state, viewModel, onOpenArtist) { playlistFor = it }
-                        item(key = "info", contentType = "info") { InfoCard(state, onOpenArtist) }
+                        item(key = "info", contentType = "info") { InfoCard(state, viewModel.lastFm.collectAsStateWithLifecycle().value, onOpenArtist) }
                         if (state.otherVersions.isNotEmpty()) shelf("versions", "Other Versions", state.otherVersions, { onOpenShelf(AlbumReleaseShelf.OtherVersions, state.accent) }, onOpenAlbum)
                         if (state.moreByArtist.isNotEmpty()) {
                             shelf("more", "More by ${state.artist}", state.moreByArtist, { onOpenShelf(AlbumReleaseShelf.MoreByArtist, state.accent) }, onOpenAlbum)
@@ -382,7 +385,7 @@ private fun clock(ms: Long): String {
 
 /** Album length, date added, label / copyright, and Navidrome description / participant credits when present. */
 @Composable
-private fun InfoCard(state: AlbumUiState, onOpenArtist: (String) -> Unit = {}) {
+private fun InfoCard(state: AlbumUiState, lastFm: LastFmInfo?, onOpenArtist: (String) -> Unit = {}) {
     val added = remember(state.addedSec) { DateFormat.getDateInstance(DateFormat.LONG).format(Date(state.addedSec * 1000)) }
     val count = state.songs.size
     val minutes = (state.durationMs / 60_000f).roundToInt().coerceAtLeast(1)
@@ -394,7 +397,17 @@ private fun InfoCard(state: AlbumUiState, onOpenArtist: (String) -> Unit = {}) {
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            extra?.description?.takeIf { it.isNotBlank() }?.let { InfoRow("About", it) }
+            // The server's text for its own albums; Last.fm's (when asked for in Settings) for local ones.
+            (extra?.description?.takeIf { it.isNotBlank() } ?: lastFm?.text.takeIf { extra == null })?.let {
+                Column {
+                    InfoRow("About", it)
+                    // The server passes on only a short summary from Last.fm; the link is the rest of it.
+                    (extra?.externalUrl ?: lastFm?.url.takeIf { extra == null })?.takeIf { url -> url.isNotBlank() }?.let { url ->
+                        val uriHandler = LocalUriHandler.current
+                        TextButton(onClick = { runCatching { uriHandler.openUri(url) } }) { Text("Read more on Last.fm") }
+                    }
+                }
+            }
             InfoRow("Length", "$length · $count ${if (count == 1) "song" else "songs"}")
             InfoRow("Added", added)
             extra?.releaseDate?.takeIf { it.isNotBlank() }?.let { InfoRow("Released", it) }

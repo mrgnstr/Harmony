@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
 import com.mrgnstr.harmony.core.data.FavouritesRepository
+import com.mrgnstr.harmony.core.data.LastFmRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
+import com.mrgnstr.harmony.core.network.LastFmInfo
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.data.PlaylistRepository
 import com.mrgnstr.harmony.core.download.OfflineDownloadManager
@@ -37,6 +39,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 @Immutable
@@ -78,6 +83,7 @@ class AlbumViewModel @AssistedInject constructor(
     private val navidrome: NavidromeRepository,
     private val downloads: OfflineDownloadManager,
     private val player: PlayerConnection,
+    private val lastFmRepository: LastFmRepository,
 ) : ViewModel() {
     @AssistedFactory
     interface Factory {
@@ -143,6 +149,16 @@ class AlbumViewModel @AssistedInject constructor(
 
     /** The user's playlists, for the add-to-playlist sheet. */
     val playlists: StateFlow<List<Playlist>> = playlistRepository.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Last.fm's text for a local album (when the option is on); server albums have the server's own. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val lastFm: StateFlow<LastFmInfo?> = flow { emit(songsFlow.first { it.isNotEmpty() }.first()) }
+        .flatMapLatest { song ->
+            if (song.isRemote) flowOf(null)
+            // "Title - Single" / "- EP" is how singles are named in the files; Last.fm knows them by the plain title.
+            else lastFmRepository.album(song.albumArtist.ifEmpty { song.artist }, title.replace(Regex(" - (Single|EP)$", RegexOption.IGNORE_CASE), ""))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val state: StateFlow<AlbumUiState> = combine(library, player.state, extras) { (songs, albums, index), playback, extras ->
         if (songs.isEmpty()) return@combine AlbumUiState(title = title, accent = extras.accent)

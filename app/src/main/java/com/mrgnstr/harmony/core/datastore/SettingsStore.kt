@@ -95,6 +95,8 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     private val nightcoreSpeedKey = floatPreferencesKey("nightcore_speed")
     private val replayGainPreampKey = floatPreferencesKey("replay_gain_preamp_db")
     private val scrobbleKey = booleanPreferencesKey("scrobble_to_server")
+    private val lastFmInfoKey = booleanPreferencesKey("last_fm_info")
+    private val lastFmApiKeyKey = stringPreferencesKey("last_fm_api_key")
 
     val librarySourceMode: Flow<LibrarySourceMode> = context.settingsDataStore.data.map { prefs ->
         prefs[sourceModeKey]?.let { s -> LibrarySourceMode.entries.firstOrNull { it.name == s } } ?: LibrarySourceMode.All
@@ -154,5 +156,19 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setScrobbleToServer(enabled: Boolean) {
         context.settingsDataStore.edit { it[scrobbleKey] = enabled }
+    }
+
+    /** Whether artist and album text for local music is fetched from Last.fm (off: nothing leaves the device for it). */
+    val lastFmInfo: Flow<Boolean> = context.settingsDataStore.data.map { it[lastFmInfoKey] ?: false }
+
+    suspend fun setLastFmInfo(enabled: Boolean) {
+        context.settingsDataStore.edit { it[lastFmInfoKey] = enabled }
+    }
+
+    /** The user's own Last.fm API key; Last.fm's API cannot be used without one. */
+    val lastFmApiKey: Flow<String> = context.settingsDataStore.data.map { it[lastFmApiKeyKey].orEmpty() }
+
+    suspend fun setLastFmApiKey(key: String) {
+        context.settingsDataStore.edit { it[lastFmApiKeyKey] = key.trim() }
     }
 }

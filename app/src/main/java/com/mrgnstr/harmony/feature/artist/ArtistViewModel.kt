@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
 import com.mrgnstr.harmony.core.data.*
+import com.mrgnstr.harmony.core.network.LastFmInfo
 import com.mrgnstr.harmony.core.model.*
 import com.mrgnstr.harmony.core.playback.PlayerConnection
 import dagger.assisted.Assisted
@@ -28,18 +29,18 @@ internal data class ArtistUiState(
     val latest: Album? = null,
     val hero: Album? = null,
     val accent: Int? = null,
-    val imagePath: String? = null,
     /** The picture shown: the user's own photo, else the server's. */
-    val imageRatio: Float = 1f,
+    val imagePath: String? = null,
     /** Whether [imagePath] is the user's own photo (which can be reset), not the server's. */
     val customImage: Boolean = false,
+    val imageRatio: Float = 1f,
     val logoPath: String? = null,
     val playingId: Long? = null,
     val favourite: Boolean = false,
     val remoteExtra: ArtistExtraInfo? = null,
-)
     /** The library's artists by lower-cased name, to show a similar artist the way every other artist tile does. */
     val libraryArtists: Map<String, Artist> = emptyMap(),
+)
 
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
 class ArtistViewModel @AssistedInject constructor(
@@ -47,6 +48,8 @@ class ArtistViewModel @AssistedInject constructor(
     repository: LibraryRepository,
     history: HistoryRepository,
     private val images: ArtistImageStore,
+    private val serverImages: ServerArtistImages,
+    lastFm: LastFmRepository,
     private val favourites: FavouritesRepository,
     private val navidrome: NavidromeRepository,
     private val player: PlayerConnection,
@@ -98,6 +101,9 @@ class ArtistViewModel @AssistedInject constructor(
             libraryArtists = parts.libraryArtists,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArtistUiState(name))
+
+    /** Last.fm's text for a local artist (when the option is on); the server's own biography is used for server artists. */
+    val lastFm: StateFlow<LastFmInfo?> = lastFm.artist(name).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val imageError = MutableStateFlow<String?>(null)
     fun play(songs: List<Song>, index: Int = 0) { if (songs.isNotEmpty()) player.playQueue(songs, index, source = name, kind = QueueSourceKind.Artist) }
