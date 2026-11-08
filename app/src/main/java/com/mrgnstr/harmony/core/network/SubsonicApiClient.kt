@@ -274,6 +274,12 @@ class SubsonicApiClient @Inject constructor(
         }
     }
 
+    /** The albums last played by this user, newest first, with the time of the play: what Navidrome's own "Recently Played" shows. */
+    suspend fun getRecentAlbums(account: ServerAccount, size: Int = 20): List<Pair<String, Long>> {
+        val sub = call(account, "getAlbumList2", listOf("type" to "recent", "size" to size.toString()) + folderParams(account))
+        return sub.obj("albumList2")?.arr("album")?.objects().orEmpty().map { it.str("id") to parseIsoTimeMs(it.strOrNull("played")) }
+    }
+
     suspend fun getAlbum(account: ServerAccount, albumRemoteId: String): RemoteAlbumWithSongs {
         val sub = call(account, "getAlbum", listOf("id" to albumRemoteId))
         val serverId = account.id.coerceAtLeast(1L)

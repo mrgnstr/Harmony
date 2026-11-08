@@ -94,6 +94,19 @@ class NavidromeRepository @Inject constructor(
         .map { it?.toModel() }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
+    private val _recentAlbums = MutableStateFlow<List<Pair<Long, Long>>>(emptyList())
+    /** (local album id, time of the last play) of the albums played most recently on any device, as of the last refresh. */
+    val recentAlbums: StateFlow<List<Pair<Long, Long>>> = _recentAlbums.asStateFlow()
+
+    /** Reads the server's Recently Played albums: plays on other devices only show up there. Failures keep the last list. */
+    suspend fun refreshRecentAlbums() {
+        val account = activeAccount.value ?: return
+        val serverId = account.id.coerceAtLeast(1L)
+        runCatching { subsonic.getRecentAlbums(account) }.onSuccess { list ->
+            _recentAlbums.value = list.map { (remoteId, playedMs) -> RemoteIds.albumId(serverId, remoteId) to playedMs }
+        }
+    }
+
     private val _syncState = MutableStateFlow(SyncState())
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
@@ -369,6 +382,8 @@ class NavidromeRepository @Inject constructor(
                     navidromeDao.upsertBookmarks(bmks.map { it.toEntity(serverId) })
                 }
             }
+
+            refreshRecentAlbums()
 
             val now = System.currentTimeMillis()
             navidromeDao.updateLastSync(serverId, now)
@@ -931,6 +946,9 @@ class NavidromeRepository @Inject constructor(
         return runCatching { nativeClient.refreshMetadata(account, kindPrefix, remoteId) }.getOrDefault(false)
     }
 
+    /** The artist's rating on the server, or null for an artist that is not on one (ratings are a Navidrome feature). */
+    suspend fun remoteArtistRating(artistName: String): Int? = navidromeDao.artistExtraByName(artistName)?.userRating
+
     suspend fun uploadCustomArtistImage(artistName: String, imageBytes: ByteArray): Boolean {
         val extra = navidromeDao.artistExtraByName(artistName) ?: return false
         val account = accountFor(extra.serverId) ?: return false
@@ -946,9 +964,6 @@ class NavidromeRepository @Inject constructor(
     private suspend fun accountFor(serverId: Long): ServerAccount? =
         if (serverId > 0L) navidromeDao.accountById(serverId)?.toModel() ?: activeAccount.value
         else activeAccount.value ?: navidromeDao.activeAccount()?.toModel()
-    /** The artist's rating on the server, or null for an artist that is not on one (ratings are a Navidrome feature). */
-    suspend fun remoteArtistRating(artistName: String): Int? = navidromeDao.artistExtraByName(artistName)?.userRating
-
 
     private companion object {
         const val TAG = "NavidromeRepo"

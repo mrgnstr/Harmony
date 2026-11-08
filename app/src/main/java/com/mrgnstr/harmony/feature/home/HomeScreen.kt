@@ -70,6 +70,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
@@ -104,33 +105,29 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
     val state: StateFlow<HomeUiState> = combine(
         combine(library.albums, library.songs, library.syncState) { a, s, sync -> Triple(a, s, sync) },
-        combine(history.entries, history.playStats) { e, stats -> e to stats },
+        combine(history.playStats, navidrome.recentAlbums) { stats, server -> stats to server },
         combine(favourites.entries, favourites.albums, favourites.artists, library.artists) { fe, fa, names, artists ->
             val byName = artists.associateBy { it.name }
             Triple(fe, fa, names.mapNotNull { byName[it] })
         },
         navidrome.radios,
         player.state,
-    ) { (albums, songs, sync), (played, playStats), (favEntries, favAlbumKeys, favArtists), radios, playback ->
+    ) { (albums, songs, sync), (playStats, serverRecent), (favEntries, favAlbumKeys, favArtists), radios, playback ->
         val byKey = albums.associateBy { AlbumKey(it.id, it.title) }
-        val recent = LinkedHashSet<Album>(RecentAlbumsLimit)
-        for (i in played.lastIndex downTo 0) {
-            val song = played[i].song
-            val album = byKey[AlbumKey(song.albumId, song.album)] ?: continue
-            recent.add(album)
-            if (recent.size >= RecentAlbumsLimit) break
+        // Each album by the time of its latest play: the local play times, and for albums on a server the server's own Recently
+        // Played, which also holds plays made on other devices.
+        val songById = songs.associateBy { it.id }
+        val playedAt = HashMap<AlbumKey, Long>()
+        for (stat in playStats.values) {
+            val song = songById[stat.songId] ?: continue
+            playedAt.merge(AlbumKey(song.albumId, song.album), stat.lastPlayedMs, ::maxOf)
         }
-        if (recent.size < RecentAlbumsLimit && playStats.isNotEmpty()) {
-            val songById = songs.associateBy { it.id }
-            playStats.values
-                .sortedByDescending { it.lastPlayedMs }
-                .forEach { stat ->
-                    if (recent.size >= RecentAlbumsLimit) return@forEach
-                    val song = songById[stat.songId] ?: return@forEach
-                    val album = byKey[AlbumKey(song.albumId, song.album)] ?: return@forEach
-                    recent.add(album)
-                }
+        val remoteByKey = albums.filter { it.id < 0L }.associateBy { it.id }
+        for ((albumId, ms) in serverRecent) {
+            val album = remoteByKey[albumId] ?: continue
+            playedAt.merge(AlbumKey(album.id, album.title), ms, ::maxOf)
         }
+        val recent = playedAt.entries.sortedByDescending { it.value }.mapNotNull { byKey[it.key] }.take(RecentAlbumsLimit)
         val allFavSongs = favEntries.map { it.song }
         val favAlbums = favAlbumKeys.mapNotNull { byKey[it] }
         HomeUiState(
@@ -146,6 +143,9 @@ class HomeViewModel @Inject constructor(
             hasLibrary = albums.isNotEmpty() || songs.isNotEmpty() || radios.isNotEmpty(),
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+
+    /** The server's Recently Played also holds plays from other devices; read it whenever Home is opened. */
+    init { viewModelScope.launch { navidrome.refreshRecentAlbums() } }
 
     fun playFavourite(index: Int) {
         val songs = state.value.allFavouriteSongs
