@@ -28,7 +28,6 @@ import com.mrgnstr.harmony.core.model.NowPlayingSession
 import com.mrgnstr.harmony.core.model.QuickConnectChallenge
 import com.mrgnstr.harmony.core.model.RadioStation
 import com.mrgnstr.harmony.core.model.RemoteIds
-import com.mrgnstr.harmony.core.model.RemotePlayQueue
 import com.mrgnstr.harmony.core.model.ScanStatusInfo
 import com.mrgnstr.harmony.core.model.ServerAccount
 import com.mrgnstr.harmony.core.model.ShareLink
@@ -820,27 +819,7 @@ class NavidromeRepository @Inject constructor(
         return if (similar.isNotEmpty()) listOf(song) + similar else listOf(song)
     }
 
-    suspend fun findSonicJourney(startSong: Song, endSong: Song, count: Int = 15): List<SonicMatchItem> {
-        val startRemote = startSong.remoteId ?: return emptyList()
-        val endRemote = endSong.remoteId ?: return emptyList()
-        val account = accountFor(startSong.serverId) ?: return emptyList()
-        return runCatching { subsonic.findSonicPath(account, startRemote, endRemote, count) }.getOrDefault(emptyList())
-    }
-
-    // --- Cloud Play Queue & Bookmarks ---
-
-    suspend fun saveCloudQueue(songIds: List<Long>, currentIndex: Int, positionMs: Long) {
-        if (!settings.syncPlayQueue.first()) return
-        val account = activeAccount.value ?: return
-        val remoteIds = songIds.mapNotNull { id -> songDao.getById(id)?.remoteId }
-        if (remoteIds.isEmpty()) return
-        runCatching { subsonic.savePlayQueueByIndex(account, remoteIds, currentIndex.coerceIn(remoteIds.indices), positionMs) }
-    }
-
-    suspend fun loadCloudQueue(): RemotePlayQueue? {
-        val account = activeAccount.value ?: return null
-        return runCatching { subsonic.getPlayQueueByIndex(account) }.getOrNull()
-    }
+    // --- Bookmarks ---
 
     fun observeBookmarkForSong(songId: Long): Flow<AudioBookmark?> =
         navidromeDao.observeBookmarkForSong(songId).map { it?.toModel() }

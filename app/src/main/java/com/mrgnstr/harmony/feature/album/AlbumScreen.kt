@@ -1,8 +1,6 @@
 package com.mrgnstr.harmony.feature.album
 
-import androidx.compose.animation.EnterExitState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +69,8 @@ import com.mrgnstr.harmony.core.designsystem.components.NavidromeShareSheet
 import com.mrgnstr.harmony.core.designsystem.components.albumCoverKey
 import com.mrgnstr.harmony.core.designsystem.components.sharedCover
 import com.mrgnstr.harmony.core.designsystem.components.DetailTopBar
+import com.mrgnstr.harmony.core.designsystem.components.rememberTransitionSettled
+import com.mrgnstr.harmony.core.designsystem.icons.PlayingBars
 import com.mrgnstr.harmony.core.designsystem.components.CoverFrame
 import com.mrgnstr.harmony.core.designsystem.components.HeaderGap
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
@@ -226,13 +226,6 @@ fun AlbumRoute(
     }
 }
 
-/** False while this page's own enter transition is running. */
-@Composable
-private fun rememberTransitionSettled(): Boolean {
-    val transition = LocalNavAnimatedContentScope.current.transition
-    return transition.currentState == EnterExitState.Visible && transition.targetState == EnterExitState.Visible
-}
-
 @Composable
 private fun Header(state: AlbumUiState, onOpenArtist: (String) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = HeaderGap), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -351,7 +344,7 @@ private fun TrackRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) {
-                if (playing) SymbolIcon(Symbols.GraphicEq, "Playing", size = 20.dp, tint = accent)
+                if (playing) PlayingBars(size = 20.dp, tint = accent)
                 else Text((song.trackNumber.takeIf { it > 0 } ?: position).toString(), style = MaterialTheme.typography.bodyLarge, color = muted)
             }
             Column(Modifier.weight(1f)) {

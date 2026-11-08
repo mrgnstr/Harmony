@@ -20,7 +20,7 @@ import com.mrgnstr.harmony.core.model.Playlist
 import java.io.File
 
 /**
- * A playlist's cover: a star for Favourites, the custom image when there is one, otherwise the first four different album covers as
+ * A playlist's cover: a heart for Favourites, the custom image when there is one, otherwise the first four different album covers as
  * a 2x2 mosaic (a single cover when it has fewer than four), otherwise a placeholder. The caller sizes and clips it.
  */
 @Composable
@@ -29,7 +29,7 @@ fun PlaylistCover(playlist: Playlist, modifier: Modifier = Modifier) {
         val art = playlist.art
         when {
             playlist.isFavourites -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                SymbolIcon(Symbols.Star, null, size = maxWidth * 0.5f, tint = MaterialTheme.colorScheme.primary, fill = 1f)
+                SymbolIcon(Symbols.Favorite, null, size = maxWidth * 0.5f, tint = MaterialTheme.colorScheme.primary, fill = 1f)
             }
             playlist.coverPath != null -> AsyncImage(File(playlist.coverPath), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             art.size >= 4 -> Column(Modifier.fillMaxSize()) {

@@ -275,7 +275,7 @@ data class ArtistExtraInfo(
     val averageRating: Double = 0.0,
 )
 
-/** Sonic similarity match from getSonicSimilarTracks or findSonicPath. */
+/** Sonic similarity match from getSonicSimilarTracks. */
 data class SonicMatchItem(
     val song: Song,
     val similarity: Double,
@@ -370,14 +370,4 @@ data class QuickConnectChallenge(
     val authenticated: Boolean = false,
     val deviceName: String = "",
     val appName: String = "",
-)
-
-/** Server-saved play queue from getPlayQueueByIndex / getPlayQueue. */
-data class RemotePlayQueue(
-    val songs: List<Song>,
-    val currentIndex: Int,
-    val positionMs: Long,
-    val username: String,
-    val changedMs: Long,
-    val changedBy: String,
 )

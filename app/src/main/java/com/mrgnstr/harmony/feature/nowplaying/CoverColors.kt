@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import com.materialkolor.hct.Hct
+import com.mrgnstr.harmony.core.artwork.CoverColour
 
 /**
  * The colours of Now Playing's controls, taken from the cover. They sit on the blurred cover (darkened below it), so they are
@@ -57,10 +58,11 @@ private const val BrightTop = 0.55f
  */
 fun coverColorsOf(dominant: Int?, bottomLuminance: Float, topLuminance: Float = 0f): CoverColors {
     val base = dominant?.let { Hct.fromInt(it) }
-    val coloured = base != null && base.chroma >= 6.0
+    // A faint cast fades in from nothing instead of jumping to a visible tint (see CoverColour.tintFade): every tint is scaled by it.
+    val fade = CoverColour.tintFade(base?.chroma ?: 0.0)
     val hue = base?.hue ?: 0.0
     val chroma = (base?.chroma ?: 0.0).coerceIn(20.0, 48.0)
-    fun tint(c: Double, tone: Double) = Color(Hct.from(hue, if (coloured) c else 0.0, tone).toInt())
+    fun tint(c: Double, tone: Double) = Color(Hct.from(hue, c * fade, tone).toInt())
     val lightTop = topLuminance > BrightTop
     return if (bottomLuminance >= BrightCover) {
         CoverColors(

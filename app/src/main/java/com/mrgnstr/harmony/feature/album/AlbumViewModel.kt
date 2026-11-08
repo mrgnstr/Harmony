@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.album
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -166,10 +167,10 @@ class AlbumViewModel @AssistedInject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumUiState(title = title, accent = accent.value))
 
-    fun play(songs: List<Song>, index: Int) = player.playQueue(songs, index, source = title)
+    fun play(songs: List<Song>, index: Int) = player.playQueue(songs, index, source = title, kind = QueueSourceKind.Album)
 
     fun shuffle(songs: List<Song>) {
-        if (songs.isNotEmpty()) player.playQueue(songs.shuffled(), 0, source = title)
+        if (songs.isNotEmpty()) player.playQueue(songs.shuffled(), 0, source = title, kind = QueueSourceKind.Album)
     }
 
     fun playNext(songs: List<Song>) = player.playNext(songs)

@@ -7,7 +7,6 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.Color
 import android.os.Process
-import androidx.palette.graphics.Palette
 import com.mrgnstr.harmony.core.database.AlbumColorDao
 import com.mrgnstr.harmony.core.database.toEntity
 import com.mrgnstr.harmony.core.database.toModel
@@ -49,7 +48,8 @@ class ArtworkColorStore @Inject constructor(
     fun peek(albumId: Long): AlbumPalette? {
         memory[albumId]?.let { return it }
         if (albumId < 0L) {
-            RemoteArtworkBridge.dominantOrThumbColor(0L, albumId)?.let { c ->
+            RemoteArtworkBridge.dominantOrThumbColor(0L, albumId)?.let { avg ->
+                val c = CoverColour.fromAverage(avg)
                 return AlbumPalette(albumId, c, c, c, hasArt = true).also { memory[albumId] = it }
             }
         }
@@ -62,7 +62,8 @@ class ArtworkColorStore @Inject constructor(
         val color = ThumbHash.parseHexColor(dominantColorHex)
             ?: thumbHash?.let { ThumbHash.decodeBase64(it) }?.let { ThumbHash.averageArgb(it) }
             ?: return
-        val palette = AlbumPalette(albumId, color, color, color, hasArt = true)
+        val seed = CoverColour.fromAverage(color)
+        val palette = AlbumPalette(albumId, seed, seed, seed, hasArt = true)
         memory[albumId] = palette
         dao.upsert(palette.toEntity())
     }
@@ -92,7 +93,8 @@ class ArtworkColorStore @Inject constructor(
         if (bitmap == null) {
             val remoteSeed = RemoteArtworkBridge.dominantOrThumbColor(songId, albumId)
             return@withContext if (remoteSeed != null) {
-                AlbumPalette(albumId, remoteSeed, remoteSeed, remoteSeed, hasArt = true)
+                val seed = CoverColour.fromAverage(remoteSeed)
+                AlbumPalette(albumId, seed, seed, seed, hasArt = true)
             } else {
                 AlbumPalette(albumId, FALLBACK, FALLBACK, FALLBACK, hasArt = false)
             }
@@ -141,8 +143,8 @@ class ArtworkColorStore @Inject constructor(
      */
     suspend fun coverSample(songId: Long, albumId: Long): CoverSample? = withContext(Dispatchers.Default) {
         val bitmap = ArtworkDecoder.decode(context, songId, albumId, SAMPLE_PX) ?: return@withContext null
-        val source = if (bitmap.hasAlpha()) opaquePixelsOf(bitmap) ?: bitmap else bitmap
-        val dominant = Palette.from(source).maximumColorCount(16).generate().dominantSwatch?.rgb?.or(OPAQUE)
+        // The colour that covers most of the cover (not the most vivid one), from the same analysis that picks the page colour.
+        val dominant = opaquePixels(bitmap)?.let { CoverColour.analyze(it).dominant }
         // Mean brightness (0..1, sRGB weights) of the bottom and top twelfth of the picture.
         val rows = (bitmap.height / 12).coerceAtLeast(1)
         val px = IntArray(bitmap.width * rows)
@@ -162,30 +164,26 @@ class ArtworkColorStore @Inject constructor(
         return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
+    /** The page colour of a cover: a seed with real colour in it, or a grey one when the cover has none (see [CoverColour]). */
     private fun extract(albumId: Long, bitmap: Bitmap): AlbumPalette {
-        val source = if (bitmap.hasAlpha()) opaquePixelsOf(bitmap) ?: bitmap else bitmap
-        val p = Palette.from(source).maximumColorCount(16).generate()
-        val primary = p.mutedSwatch?.rgb ?: p.vibrantSwatch?.rgb ?: p.dominantSwatch?.rgb ?: FALLBACK
-        val secondary = p.lightVibrantSwatch?.rgb ?: p.vibrantSwatch?.rgb ?: p.mutedSwatch?.rgb ?: primary
-        val tertiary = p.darkVibrantSwatch?.rgb ?: p.vibrantSwatch?.rgb ?: p.darkMutedSwatch?.rgb ?: primary
-        return AlbumPalette(albumId, primary or OPAQUE, secondary or OPAQUE, tertiary or OPAQUE, hasArt = true)
+        val a = opaquePixels(bitmap)?.let(CoverColour::analyze) ?: return AlbumPalette(albumId, FALLBACK, FALLBACK, FALLBACK, hasArt = true)
+        return AlbumPalette(albumId, a.seed, a.secondary, a.tertiary, hasArt = true)
     }
 
-    /** Packs only non-transparent pixels so [Palette] does not treat transparent areas (0x00000000) as black. */
-    private fun opaquePixelsOf(bitmap: Bitmap): Bitmap? {
+    /** Only the non-transparent pixels, made opaque, so transparent areas (0x00000000) do not count as black. Null when there are none. */
+    private fun opaquePixels(bitmap: Bitmap): IntArray? {
         val px = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         var count = 0
         for (c in px) {
             if ((c ushr 24) >= 128) px[count++] = c or OPAQUE
         }
-        if (count == 0) return null
-        return Bitmap.createBitmap(px, 0, count, count, 1, Bitmap.Config.ARGB_8888)
+        return if (count == 0) null else px.copyOf(count)
     }
 
     private companion object {
         const val SAMPLE_PX = 64
-        const val RULE_VERSION = 4 // 2: vibrant over dominant; 3: secondary = light vibrant, tertiary = dark vibrant; 4: primary = muted
+        const val RULE_VERSION = 7 // 2: vibrant over dominant; 3: secondary = light vibrant, tertiary = dark vibrant; 4: primary = muted; 5: Material quantizer + Score, grey seed for covers with no colour; 6: vivid covers lift muted cluster colours; 7: server average colours are hue hints (lifted if coloured)
         val OPAQUE = 0xFF000000.toInt()
         val FALLBACK = Color.rgb(60, 60, 66)
     }

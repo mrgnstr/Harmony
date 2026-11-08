@@ -67,6 +67,7 @@ data class QueueState(
     val items: List<QueueItem> = emptyList(),
     val currentIndex: Int = 0,
     val source: String? = null,
+    val sourceKind: QueueSourceKind = QueueSourceKind.Other,
     val shuffled: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
 ) {
@@ -160,6 +161,7 @@ class PlayerConnection @Inject constructor(
             items = items,
             currentIndex = player.currentMediaItemIndex,
             source = store.source,
+            sourceKind = store.sourceKind,
             shuffled = store.unshuffled != null,
             repeat = when (player.repeatMode) {
                 Player.REPEAT_MODE_ONE -> RepeatMode.One
@@ -186,11 +188,12 @@ class PlayerConnection @Inject constructor(
     }
 
     /** Replaces the queue with [songs] and starts at [startIndex]; [source] names what they were played from. */
-    fun playQueue(songs: List<Song>, startIndex: Int, source: String? = null) {
+    fun playQueue(songs: List<Song>, startIndex: Int, source: String? = null, kind: QueueSourceKind = QueueSourceKind.Other) {
         if (songs.isEmpty()) return
         val items: List<MediaItem> = songs.map { it.toMediaItem() }
         store.unshuffled = null
         store.source = source
+        store.sourceKind = kind
         withController {
             it.setMediaItems(items, startIndex.coerceIn(items.indices), 0L)
             it.prepare()
@@ -203,6 +206,7 @@ class PlayerConnection @Inject constructor(
         val item = station.toMediaItem()
         store.unshuffled = null
         store.source = station.name
+        store.sourceKind = QueueSourceKind.Radio
         withController {
             it.setMediaItems(listOf(item), 0, 0L)
             it.prepare()
@@ -252,6 +256,7 @@ class PlayerConnection @Inject constructor(
         val item = song.toMediaItem()
         if (c.mediaItemCount == 0) {
             store.source = null
+            store.sourceKind = QueueSourceKind.Other
             c.setMediaItems(listOf(item)); c.prepare(); c.play()
         } else {
             val at = c.currentMediaItemIndex + 1
@@ -274,6 +279,7 @@ class PlayerConnection @Inject constructor(
             // Nothing loaded yet: the songs simply start playing.
             if (c.mediaItemCount == 0) {
                 store.source = null
+                store.sourceKind = QueueSourceKind.Other
                 c.setMediaItems(items); c.prepare(); c.play()
             } else c.addMediaItems(at(c), items)
         }
@@ -298,6 +304,7 @@ class PlayerConnection @Inject constructor(
         c.clearMediaItems()
         c.stop()
         store.source = null
+        store.sourceKind = QueueSourceKind.Other
         store.unshuffled = null
         publishQueue(c, rebuildItems = true)
     }

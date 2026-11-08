@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.home
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
@@ -132,7 +133,7 @@ class HomeViewModel @Inject constructor(
 
     fun playFavourite(index: Int) {
         val songs = state.value.allFavouriteSongs
-        if (index in songs.indices) player.playQueue(songs, index, source = FAVOURITES_NAME)
+        if (index in songs.indices) player.playQueue(songs, index, source = FAVOURITES_NAME, kind = QueueSourceKind.Favourites)
     }
 
     fun playRadio(station: RadioStation) {

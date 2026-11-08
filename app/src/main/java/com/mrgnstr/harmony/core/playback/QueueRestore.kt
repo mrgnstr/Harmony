@@ -16,6 +16,7 @@ class SavedQueue(
     val positionMs: Long,
     val repeatMode: Int,
     val source: String?,
+    val sourceKind: QueueSourceKind,
     /** The order shuffle goes back to, or null when the queue was not shuffled. */
     val unshuffled: List<MediaItem>?,
 )
@@ -49,6 +50,7 @@ class QueueRestorer @Inject constructor(private val dao: QueueDao) {
             positionMs = if (point.keepPosition) state.positionMs else 0L,
             repeatMode = state.repeatMode.takeIf { it in RepeatModes } ?: Player.REPEAT_MODE_OFF,
             source = state.source,
+            sourceKind = QueueSourceKind.from(state.sourceKind),
             unshuffled = unshuffled?.map { it.toItem() },
         )
     }

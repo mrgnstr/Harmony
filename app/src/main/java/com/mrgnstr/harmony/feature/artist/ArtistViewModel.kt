@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.artist
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
@@ -90,7 +91,7 @@ class ArtistViewModel @AssistedInject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArtistUiState(name))
 
     val imageError = MutableStateFlow<String?>(null)
-    fun play(songs: List<Song>, index: Int = 0) { if (songs.isNotEmpty()) player.playQueue(songs, index, source = name) }
+    fun play(songs: List<Song>, index: Int = 0) { if (songs.isNotEmpty()) player.playQueue(songs, index, source = name, kind = QueueSourceKind.Artist) }
     fun shuffle() = play(state.value.songs.shuffled())
     fun playRelease(album: Album) = play(state.value.songs.filter { it.albumId == album.id && it.album == album.title })
     fun playNext(song: Song) = player.playNext(listOf(song))

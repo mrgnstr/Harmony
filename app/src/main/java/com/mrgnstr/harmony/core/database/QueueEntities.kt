@@ -32,6 +32,8 @@ data class QueueStateEntity(
     val repeatMode: Int,
     val shuffled: Boolean,
     val source: String?,
+    /** `QueueSourceKind` name; null on queues saved before it existed. */
+    val sourceKind: String?,
     val updatedAtMs: Long,
 )
 

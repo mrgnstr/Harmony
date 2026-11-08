@@ -16,7 +16,6 @@ import com.mrgnstr.harmony.core.model.OpenSubsonicExtension
 import com.mrgnstr.harmony.core.model.ParticipantCredit
 import com.mrgnstr.harmony.core.model.RadioStation
 import com.mrgnstr.harmony.core.model.RemoteIds
-import com.mrgnstr.harmony.core.model.RemotePlayQueue
 import com.mrgnstr.harmony.core.model.ReplayGainInfo
 import com.mrgnstr.harmony.core.model.ScanStatusInfo
 import com.mrgnstr.harmony.core.model.ServerAccount
@@ -356,23 +355,6 @@ class SubsonicApiClient @Inject constructor(
         }
     }
 
-    suspend fun findSonicPath(
-        account: ServerAccount,
-        startSongRemoteId: String,
-        endSongRemoteId: String,
-        count: Int = 15,
-    ): List<SonicMatchItem> {
-        val sub = call(
-            account,
-            "findSonicPath",
-            listOf("startSongId" to startSongRemoteId, "endSongId" to endSongRemoteId, "count" to count.toString()),
-        )
-        return sub.arr("sonicMatch").objects().mapNotNull { m ->
-            val entry = m.obj("entry") ?: return@mapNotNull null
-            SonicMatchItem(parseSongChild(account, entry), m.double("similarity", 0.0))
-        }
-    }
-
     // --- Starred (Favourites) & Ratings ---
 
     suspend fun getStarred2(account: ServerAccount): RemoteStarredResult {
@@ -461,55 +443,7 @@ class SubsonicApiClient @Inject constructor(
         }
     }
 
-    // --- Cloud Play Queue & Bookmarks ---
-
-    suspend fun getPlayQueueByIndex(account: ServerAccount): RemotePlayQueue? {
-        val indexBased = account.supportsExtension("indexBasedQueue")
-        val sub = call(account, if (indexBased) "getPlayQueueByIndex" else "getPlayQueue")
-        val pq = sub.obj("playQueueByIndex") ?: sub.obj("playQueue") ?: return null
-        val songs = pq.arr("entry").objects().map { parseSongChild(account, it) }
-        if (songs.isEmpty()) return null
-        val currentIdx = if (pq["currentIndex"] != null) {
-            pq.int("currentIndex", 0).coerceIn(songs.indices)
-        } else {
-            val currentId = pq.strOrNull("current")
-            songs.indexOfFirst { it.remoteId == currentId }.takeIf { it >= 0 } ?: 0
-        }
-        return RemotePlayQueue(
-            songs = songs,
-            currentIndex = currentIdx,
-            positionMs = pq.long("position", 0L),
-            username = pq.str("username", account.username),
-            changedMs = parseIsoTimeMs(pq.strOrNull("changed")),
-            changedBy = pq.str("changedBy"),
-        )
-    }
-
-    suspend fun savePlayQueueByIndex(
-        account: ServerAccount,
-        remoteSongIds: List<String>,
-        currentIndex: Int,
-        positionMs: Long,
-    ) {
-        val indexBased = account.supportsExtension("indexBasedQueue")
-        if (indexBased) {
-            val params = buildList {
-                remoteSongIds.forEach { add("id" to it) }
-                if (remoteSongIds.isNotEmpty()) {
-                    add("currentIndex" to currentIndex.coerceIn(remoteSongIds.indices).toString())
-                }
-                add("position" to positionMs.coerceAtLeast(0L).toString())
-            }
-            call(account, "savePlayQueueByIndex", params)
-        } else {
-            val params = buildList {
-                remoteSongIds.forEach { add("id" to it) }
-                remoteSongIds.getOrNull(currentIndex)?.let { add("current" to it) }
-                add("position" to positionMs.coerceAtLeast(0L).toString())
-            }
-            call(account, "savePlayQueue", params)
-        }
-    }
+    // --- Bookmarks ---
 
     suspend fun getBookmarks(account: ServerAccount): List<AudioBookmark> {
         val sub = call(account, "getBookmarks")

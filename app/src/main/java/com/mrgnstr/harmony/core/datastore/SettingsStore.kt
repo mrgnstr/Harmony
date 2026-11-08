@@ -94,7 +94,6 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     private val nightcoreKey = booleanPreferencesKey("nightcore")
     private val nightcoreSpeedKey = floatPreferencesKey("nightcore_speed")
     private val replayGainPreampKey = floatPreferencesKey("replay_gain_preamp_db")
-    private val syncPlayQueueKey = booleanPreferencesKey("sync_play_queue")
     private val scrobbleKey = booleanPreferencesKey("scrobble_to_server")
 
     val librarySourceMode: Flow<LibrarySourceMode> = context.settingsDataStore.data.map { prefs ->
@@ -149,12 +148,6 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setReplayGainPreampDb(db: Float) {
         context.settingsDataStore.edit { it[replayGainPreampKey] = db.coerceIn(-12f, 12f) }
-    }
-
-    val syncPlayQueue: Flow<Boolean> = context.settingsDataStore.data.map { it[syncPlayQueueKey] ?: true }
-
-    suspend fun setSyncPlayQueue(enabled: Boolean) {
-        context.settingsDataStore.edit { it[syncPlayQueueKey] = enabled }
     }
 
     val scrobbleToServer: Flow<Boolean> = context.settingsDataStore.data.map { it[scrobbleKey] ?: true }

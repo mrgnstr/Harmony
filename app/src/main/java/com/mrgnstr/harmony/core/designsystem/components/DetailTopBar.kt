@@ -50,3 +50,10 @@ fun DetailTopBar(
         }
     }
 }
+
+/** False while this page's own enter transition is running: pages hold back their heavy content until it has settled. */
+@Composable
+fun rememberTransitionSettled(): Boolean {
+    val transition = androidx.navigation3.ui.LocalNavAnimatedContentScope.current.transition
+    return transition.currentState == androidx.compose.animation.EnterExitState.Visible && transition.targetState == androidx.compose.animation.EnterExitState.Visible
+}

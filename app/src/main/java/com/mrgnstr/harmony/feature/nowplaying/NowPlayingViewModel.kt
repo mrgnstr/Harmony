@@ -53,8 +53,6 @@ class NowPlayingViewModel @Inject constructor(
     val snapshot: StateFlow<PlaybackSnapshot> = player.state
     val queue: StateFlow<QueueState> = player.queue
     val jukeboxState: StateFlow<JukeboxState> = navidrome.jukeboxState
-    val hasNavidrome: StateFlow<Boolean> = navidrome.activeAccount.map { it != null }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     val hasJukeboxRole: StateFlow<Boolean> = navidrome.activeAccount.map { it?.jukeboxRole == true || it?.isAdmin == true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
@@ -154,38 +152,7 @@ class NowPlayingViewModel @Inject constructor(
     fun cycleRepeat() = player.cycleRepeat()
     fun skipToQueueIndex(index: Int) = player.skipToQueueIndex(index)
     fun removeQueueItem(index: Int) = player.removeQueueItem(index)
-
-    fun saveCloudQueue() {
-        val q = queue.value
-        val pos = progress.value.positionMs
-        viewModelScope.launch {
-            navidrome.saveCloudQueue(q.items.map { it.songId }, q.currentIndex, pos)
-        }
-    }
-
-    fun loadCloudQueue() {
-        viewModelScope.launch {
-            val remote = navidrome.loadCloudQueue() ?: return@launch
-            if (remote.songs.isNotEmpty()) {
-                player.playQueue(remote.songs, remote.currentIndex, source = "Navidrome Queue")
-                if (remote.positionMs > 0L) player.seekTo(remote.positionMs)
-            }
-        }
-    }
-
-    fun insertSonicJourneyTo(targetMediaId: String) {
-        val currentId = snapshot.value.songId ?: return
-        val targetId = targetMediaId.toLongOrNull() ?: return
-        viewModelScope.launch {
-            val allSongs = libraryRepository.songs.first()
-            val startSong = allSongs.firstOrNull { it.id == currentId } ?: return@launch
-            val endSong = allSongs.firstOrNull { it.id == targetId } ?: return@launch
-            val path = navidrome.findSonicJourney(startSong, endSong)
-            if (path.isNotEmpty()) {
-                player.playNext(path.map { it.song })
-            }
-        }
-    }
+    fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
 
     fun saveBookmark(note: String) {
         val songId = snapshot.value.songId ?: return

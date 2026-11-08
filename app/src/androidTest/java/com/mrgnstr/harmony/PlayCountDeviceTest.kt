@@ -8,6 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mrgnstr.harmony.core.database.HarmonyDatabase
 import com.mrgnstr.harmony.core.database.MIGRATION_10_11
 import com.mrgnstr.harmony.core.database.MIGRATION_11_12
+import com.mrgnstr.harmony.core.database.MIGRATION_12_13
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -45,7 +46,7 @@ class PlayCountDeviceTest {
                 old.execSQL("INSERT INTO history (songId, playedAtMs) VALUES (1, 10), (2, 20), (1, 30)")
                 old.version = 10
             }
-            val db = Room.databaseBuilder(context, HarmonyDatabase::class.java, name).addMigrations(MIGRATION_10_11, MIGRATION_11_12).build()
+            val db = Room.databaseBuilder(context, HarmonyDatabase::class.java, name).addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13).build()
             try {
                 val dao = db.historyDao()
                 assertEquals(mapOf(1L to 2, 2L to 1), dao.observePlayCounts().first().associate { it.songId to it.count })

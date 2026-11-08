@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.core.designsystem.components
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -216,7 +217,7 @@ class MediaMenuViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = library.albumSongs(album.id, album.title).first()
             if (songs.isNotEmpty()) {
-                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = album.title)
+                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = album.title, kind = QueueSourceKind.Album)
             }
         }
     }
@@ -250,7 +251,7 @@ class MediaMenuViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = library.artistSongs(artistName).first()
             if (songs.isNotEmpty()) {
-                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = artistName)
+                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = artistName, kind = QueueSourceKind.Artist)
             }
         }
     }

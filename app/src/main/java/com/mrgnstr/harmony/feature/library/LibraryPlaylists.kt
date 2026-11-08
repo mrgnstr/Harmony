@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.library
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -56,6 +57,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil3.compose.AsyncImage
+import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
 import com.mrgnstr.harmony.core.data.FavouritesRepository
 import com.mrgnstr.harmony.core.data.LibraryRepository
 import com.mrgnstr.harmony.core.data.PlaylistRepository
@@ -76,6 +78,7 @@ import com.mrgnstr.harmony.core.designsystem.components.itemMotion
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.model.Album
+import com.mrgnstr.harmony.core.model.Artist
 import com.mrgnstr.harmony.core.model.FAVOURITES_PLAYLIST_ID
 import com.mrgnstr.harmony.core.model.Playlist
 import com.mrgnstr.harmony.core.model.PlaylistEntry
@@ -86,9 +89,13 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -216,7 +223,7 @@ private fun PlaylistTile(
 /** New playlist / edit playlist: a cover to pick (tap it) and a name. [onSave] gets the picked image, if any, and whether to drop the custom cover. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun PlaylistEditor(initial: Playlist?, onDismiss: () -> Unit, onSave: (name: String, coverUri: String?, clearCover: Boolean) -> Unit) {
+internal fun PlaylistEditor(initial: Playlist?, onDismiss: () -> Unit, onSave: (name: String, coverUri: String?, clearCover: Boolean) -> Unit) {
     var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var picked by rememberSaveable { mutableStateOf<String?>(null) }
     var reset by rememberSaveable { mutableStateOf(false) }
@@ -262,6 +269,10 @@ private fun PlaylistEditor(initial: Playlist?, onDismiss: () -> Unit, onSave: (n
 data class PlaylistDetailUiState(
     val playlist: Playlist? = null,
     val entries: List<PlaylistEntry> = emptyList(),
+    /** Cover colour (ARGB) of the first song the page is themed with; null for Favourites or until the palette is known. */
+    val accent: Int? = null,
+    /** The artists on the playlist, in the order their first song appears in it. */
+    val featuredArtists: List<Artist> = emptyList(),
     val playingId: Long? = null,
     val favouriteSongIds: Set<Long> = emptySet(),
     val loaded: Boolean = false,
@@ -272,7 +283,8 @@ class PlaylistDetailViewModel @AssistedInject constructor(
     @Assisted private val playlistId: Long,
     private val playlistRepository: PlaylistRepository,
     private val favourites: FavouritesRepository,
-    library: LibraryRepository,
+    private val library: LibraryRepository,
+    private val colorStore: ArtworkColorStore,
     private val player: PlayerConnection,
 ) : ViewModel() {
     @AssistedFactory
@@ -286,37 +298,72 @@ class PlaylistDetailViewModel @AssistedInject constructor(
     val albums: StateFlow<List<Album>> = library.albums
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Every song in the library, for the add-songs picker. */
+    val librarySongs: StateFlow<List<Song>> = library.songs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val entries = playlistRepository.entries(playlistId)
+
+    private val accent = MutableStateFlow<Int?>(null)
+
+    init {
+        // Themed by the cover of the first song (known at once when its palette was seen before); Favourites keep the wallpaper's colours.
+        if (playlistId != FAVOURITES_PLAYLIST_ID) viewModelScope.launch {
+            entries.map { it.firstOrNull()?.song }.distinctUntilChangedBy { it?.id }.collect { song ->
+                accent.value = song?.let { s ->
+                    (colorStore.peek(s.albumId) ?: colorStore.paletteFor(s.id, s.albumId))?.takeIf { it.hasArt }?.primary
+                }
+            }
+        }
+    }
+
+    private val featuredArtists: Flow<List<Artist>> = combine(entries, library.artistIndex, library.artists) { entries, index, artists ->
+        val byName = artists.associateBy { it.name.lowercase() }
+        entries.asSequence()
+            .flatMap { index.artistsOf(it.song.artist) }
+            .distinctBy { it.lowercase() }
+            .mapNotNull { byName[it.lowercase()] }
+            .toList()
+    }
+
     val state: StateFlow<PlaylistDetailUiState> = combine(
         playlistRepository.playlist(playlistId),
-        playlistRepository.entries(playlistId),
+        entries,
         player.state,
         favourites.songIds,
-    ) { playlist, entries, playback, favIds ->
+        combine(accent, featuredArtists, ::Pair),
+    ) { playlist, entries, playback, favIds, (accent, artists) ->
         PlaylistDetailUiState(
             playlist = playlist,
             entries = entries,
+            accent = accent,
+            featuredArtists = artists,
             playingId = playback.mediaId?.toLongOrNull(),
             favouriteSongIds = favIds,
             loaded = true,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaylistDetailUiState())
 
+    private fun playlistKind() = if (state.value.playlist?.isFavourites == true) QueueSourceKind.Favourites else QueueSourceKind.Playlist
+
     fun play(index: Int) {
         val songs = state.value.entries.map { it.song }
         if (index in songs.indices) {
-            player.playQueue(songs, index, source = state.value.playlist?.name ?: "Playlist")
+            player.playQueue(songs, index, source = state.value.playlist?.name ?: "Playlist", kind = playlistKind())
         }
     }
 
     fun shuffle() {
         val songs = state.value.entries.map { it.song }
         if (songs.isNotEmpty()) {
-            player.playQueue(songs.shuffled(), 0, source = state.value.playlist?.name ?: "Playlist")
+            player.playQueue(songs.shuffled(), 0, source = state.value.playlist?.name ?: "Playlist", kind = playlistKind())
         }
     }
 
     fun playNext(song: Song) = player.playNext(listOf(song))
     fun addToQueue(song: Song) = player.playLast(listOf(song))
+    fun playNextAll() = player.playNext(state.value.entries.map { it.song })
+    fun addAllToQueue() = player.playLast(state.value.entries.map { it.song })
     fun toggleFavourite(song: Song) { viewModelScope.launch { favourites.toggleSong(song.id) } }
     fun removeEntry(entryId: Long) {
         viewModelScope.launch {
@@ -342,99 +389,5 @@ class PlaylistDetailViewModel @AssistedInject constructor(
         if (playlistId != FAVOURITES_PLAYLIST_ID) {
             viewModelScope.launch { playlistRepository.delete(playlistId) }
         }
-    }
-}
-
-@Composable
-fun PlaylistRoute(
-    playlistId: Long,
-    onBack: () -> Unit,
-    onOpenAlbum: (Album) -> Unit,
-    onOpenArtist: (String) -> Unit,
-    viewModel: PlaylistDetailViewModel = hiltViewModel<PlaylistDetailViewModel, PlaylistDetailViewModel.Factory>(
-        key = "playlist:$playlistId",
-        creationCallback = { it.create(playlistId) },
-    ),
-) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val playlist = state.playlist
-    var seen by remember { mutableStateOf(false) }
-    LaunchedEffect(state.loaded, playlist) {
-        if (state.loaded && playlist != null) seen = true
-        else if (seen && playlist == null) onBack()
-    }
-    var menuOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
-
-    TopBarScaffold(
-        title = playlist?.name ?: if (playlistId == FAVOURITES_PLAYLIST_ID) "Favourite Songs" else "Playlist",
-        subtitle = playlist?.let { "${it.songCount} ${if (it.songCount == 1) "song" else "songs"}" },
-        onBack = onBack,
-        actions = {
-            if (playlist != null && !playlist.isFavourites && playlist.editable) {
-                Box {
-                    IconButton(onClick = { menuOpen = true }) { SymbolIcon(Symbols.MoreVert, "More") }
-                    DropdownMenu(menuOpen, { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Edit") },
-                            leadingIcon = { SymbolIcon(Symbols.Edit, null) },
-                            onClick = { menuOpen = false; editing = true },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { SymbolIcon(Symbols.Delete, null) },
-                            onClick = { menuOpen = false; deleting = true },
-                        )
-                    }
-                }
-            }
-        },
-    ) {
-        if (state.entries.isEmpty()) {
-            val isFav = playlistId == FAVOURITES_PLAYLIST_ID
-            EmptyState(
-                loading = !state.loaded,
-                symbol = if (isFav) Symbols.Favorite else Symbols.QueueMusic,
-                title = if (isFav) "No favourite songs" else "Playlist is empty",
-                message = if (isFav) "Songs you mark as favourite show up here." else "Add songs from any album, artist or search.",
-            )
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = LocalSideInsets.current.padding(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp),
-            ) {
-                item(key = "buttons", contentType = "buttons") {
-                    PlayShuffleButtons(onPlay = { viewModel.play(0) }, onShuffle = viewModel::shuffle, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                listItemsIndexed(state.entries, key = { _, entry -> entry.entryId }, contentType = { _, _ -> "song" }) { index, entry ->
-                    val song = entry.song
-                    SongRow(
-                        song = song,
-                        onClick = { viewModel.play(index) },
-                        subtitle = listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · "),
-                        playing = song.id == state.playingId,
-                        onRemoveFromPlaylist = if (playlistId != FAVOURITES_PLAYLIST_ID && playlist?.editable != false) ({ viewModel.removeEntry(entry.entryId) }) else null,
-                        modifier = itemMotion(),
-                    )
-                }
-            }
-        }
-    }
-
-    if (editing && playlist != null) {
-        PlaylistEditor(playlist, { editing = false }) { name, cover, clear ->
-            editing = false
-            viewModel.edit(name, cover, clear)
-        }
-    }
-    if (deleting && playlist != null) {
-        AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text("Delete \"${playlist.name}\"?") },
-            text = { Text("The songs stay in your library.") },
-            confirmButton = { TextButton(onClick = { deleting = false; viewModel.delete() }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
-        )
     }
 }

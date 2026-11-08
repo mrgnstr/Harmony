@@ -17,6 +17,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.roundToInt
 import com.materialkolor.PaletteStyle
+import com.materialkolor.hct.Hct
+import com.mrgnstr.harmony.core.artwork.CoverColour
+import com.mrgnstr.harmony.core.artwork.SeedLook
 import com.materialkolor.dynamicColorScheme
 import com.materialkolor.dynamiccolor.ColorSpec
 
@@ -38,24 +41,35 @@ val FallbackSeed = Color(0xFF6750A4)
  * dynamic-colour algorithm, 2025 spec) so an album page looks like the system would theme that colour.
  */
 class SchemeFactory(private val context: Context) {
-    private val cache = object : LinkedHashMap<Triple<ColorSource, Boolean, PaletteStyle>, ColorScheme>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Triple<ColorSource, Boolean, PaletteStyle>, ColorScheme>) = size > 24
+    private val cache = object : LinkedHashMap<Triple<ColorSource, Boolean, PaletteStyle?>, ColorScheme>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Triple<ColorSource, Boolean, PaletteStyle?>, ColorScheme>) = size > 24
     }
 
-    fun scheme(source: ColorSource, dark: Boolean, style: PaletteStyle = PaletteStyle.TonalSpot): ColorScheme =
+    /** [style] null: picked from the seed (see [styleOf]). */
+    fun scheme(source: ColorSource, dark: Boolean, style: PaletteStyle? = null): ColorScheme =
         cache.getOrPut(Triple(source, dark, style)) {
             when (source) {
                 ColorSource.Wallpaper ->
                     if (Build.VERSION.SDK_INT >= 31) {
                         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-                    } else fromSeed(FallbackSeed, dark, style)
-                is ColorSource.Seed -> fromSeed(Color(source.argb), dark, style)
+                    } else fromSeed(FallbackSeed, dark, style ?: PaletteStyle.TonalSpot)
+                is ColorSource.Seed -> fromSeed(Color(source.argb), dark, style ?: styleOf(source.argb))
             }
         }
 
     /** The system's wallpaper colours changed (the activity is recreated for that, but be safe). */
     fun invalidateWallpaper() {
         cache.keys.removeAll { it.first == ColorSource.Wallpaper }
+    }
+
+    /**
+     * TonalSpot gives every seed the same colourfulness and reads only its hue, so a grey cover (whose hue is noise, or the cyan-blue
+     * every grey has) would get a made-up colour. Seeds with no colour in them get no colour, muted seeds a hint of theirs.
+     */
+    private fun styleOf(seed: Int): PaletteStyle = when (CoverColour.lookOf(Hct.fromInt(seed).chroma)) {
+        SeedLook.Monochrome -> PaletteStyle.Monochrome
+        SeedLook.Neutral -> PaletteStyle.Neutral
+        SeedLook.Vivid -> PaletteStyle.TonalSpot
     }
 
     private fun fromSeed(seed: Color, dark: Boolean, style: PaletteStyle) =

@@ -155,6 +155,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun applySaved(saved: SavedQueue) {
         queueStore.source = saved.source
+        queueStore.sourceKind = saved.sourceKind
         queueStore.unshuffled = saved.unshuffled
     }
 

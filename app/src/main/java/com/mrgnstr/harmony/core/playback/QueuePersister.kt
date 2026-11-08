@@ -111,6 +111,7 @@ internal class QueuePersister(
             repeatMode = player.repeatMode,
             shuffled = store.unshuffled != null,
             source = store.source,
+            sourceKind = store.sourceKind.name,
             updatedAtMs = System.currentTimeMillis(),
         )
         val play = if (items) List(player.mediaItemCount) { player.getMediaItemAt(it) }.toRows(QueueItemEntity.LIST_PLAY) else null

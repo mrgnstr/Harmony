@@ -113,8 +113,6 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReplayGainMode.Smart)
     val replayGainPreampDb: StateFlow<Float> = settings.replayGainPreampDb
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
-    val syncPlayQueue: StateFlow<Boolean> = settings.syncPlayQueue
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     val scrobbleToServer: StateFlow<Boolean> = settings.scrobbleToServer
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -140,7 +138,6 @@ class SettingsViewModel @Inject constructor(
     fun setMobileQuality(quality: StreamQuality) { viewModelScope.launch { settings.setMobileStreamQuality(quality) } }
     fun setReplayGainMode(mode: ReplayGainMode) { viewModelScope.launch { settings.setReplayGainMode(mode) } }
     fun setReplayGainPreamp(db: Float) { viewModelScope.launch { settings.setReplayGainPreampDb(db) } }
-    fun setSyncPlayQueue(enabled: Boolean) { viewModelScope.launch { settings.setSyncPlayQueue(enabled) } }
     fun setScrobbleToServer(enabled: Boolean) { viewModelScope.launch { settings.setScrobbleToServer(enabled) } }
 
     fun triggerScan(fullScan: Boolean) { viewModelScope.launch { navidrome.triggerServerScan(fullScan) } }
@@ -170,7 +167,6 @@ fun SettingsRoute(
     val mobileQuality by viewModel.mobileQuality.collectAsStateWithLifecycle()
     val rgMode by viewModel.replayGainMode.collectAsStateWithLifecycle()
     val rgPreamp by viewModel.replayGainPreampDb.collectAsStateWithLifecycle()
-    val syncQueue by viewModel.syncPlayQueue.collectAsStateWithLifecycle()
     val scrobble by viewModel.scrobbleToServer.collectAsStateWithLifecycle()
 
     var showConnectSheet by remember { mutableStateOf(false) }
@@ -375,12 +371,6 @@ fun SettingsRoute(
                             )
                         }
                     }
-                    SwitchSettingRow(
-                        title = "Sync Play Queue across Devices",
-                        subtitle = "Saves and restores play queue on Navidrome",
-                        checked = syncQueue,
-                        onCheckedChange = viewModel::setSyncPlayQueue,
-                    )
                     SwitchSettingRow(
                         title = "Scrobble & Report Playback",
                         subtitle = "Updates Now Playing, play counts, Last.fm & ListenBrainz",

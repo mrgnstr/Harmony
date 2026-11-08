@@ -121,7 +121,6 @@ internal fun FullPlayerControls(
         var showQueue by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         val lyrics by vm.lyrics.collectAsStateWithLifecycle()
-        val hasNavidrome by vm.hasNavidrome.collectAsStateWithLifecycle()
         // In a panel the title row lives in the panel's header, and the rows from the seek bar down fade away after a while.
         val controlsShown = remember(panel) { derivedStateOf { panel.controlsHidden.value < 0.98f } }
         val away = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
@@ -219,12 +218,9 @@ internal fun FullPlayerControls(
         if (showQueue) NowPlayingPopupTheme {
             QueueModalSheet(
                 queue = queue,
-                hasNavidrome = hasNavidrome,
                 onSkipToIndex = vm::skipToQueueIndex,
                 onRemoveIndex = vm::removeQueueItem,
-                onSonicJourneyTo = vm::insertSonicJourneyTo,
-                onSaveCloudQueue = vm::saveCloudQueue,
-                onLoadCloudQueue = vm::loadCloudQueue,
+                onMove = vm::moveQueueItem,
                 onDismiss = { showQueue = false },
             )
         }

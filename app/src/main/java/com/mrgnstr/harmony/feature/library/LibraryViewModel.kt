@@ -1,5 +1,6 @@
 package com.mrgnstr.harmony.feature.library
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.data.ArtistImageStore
@@ -220,7 +221,7 @@ class LibraryViewModel @Inject constructor(
     fun playPlaylist(playlist: Playlist, shuffled: Boolean) {
         viewModelScope.launch {
             val songs = playlistRepository.entries(playlist.id).first().map { it.song }
-            if (songs.isNotEmpty()) player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = playlist.name)
+            if (songs.isNotEmpty()) player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = playlist.name, kind = if (playlist.isFavourites) QueueSourceKind.Favourites else QueueSourceKind.Playlist)
         }
     }
 

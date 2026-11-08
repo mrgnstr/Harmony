@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mrgnstr.harmony.core.database.HarmonyDatabase
 import com.mrgnstr.harmony.core.database.MIGRATION_11_12
+import com.mrgnstr.harmony.core.database.MIGRATION_12_13
 import com.mrgnstr.harmony.core.database.ServerAccountEntity
 import com.mrgnstr.harmony.core.database.SongEntity
 import kotlinx.coroutines.flow.first
@@ -52,7 +53,7 @@ class Migration11To12DeviceTest {
             }
 
             val db = Room.databaseBuilder(context, HarmonyDatabase::class.java, name)
-                .addMigrations(MIGRATION_11_12)
+                .addMigrations(MIGRATION_11_12, MIGRATION_12_13)
                 .build()
             try {
                 val localSongs = db.songDao().observeAll().first()

@@ -5,6 +5,7 @@
 
 package com.mrgnstr.harmony.feature.search
 
+import com.mrgnstr.harmony.core.playback.QueueSourceKind
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -260,7 +261,7 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = library.albumSongs(album.id, album.title).first()
             if (songs.isNotEmpty()) {
-                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = album.title)
+                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = album.title, kind = QueueSourceKind.Album)
             }
         }
     }
@@ -270,7 +271,7 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = library.artistSongs(artist.name).first()
             if (songs.isNotEmpty()) {
-                player.playQueue(songs, 0, source = artist.name)
+                player.playQueue(songs, 0, source = artist.name, kind = QueueSourceKind.Artist)
             }
         }
     }
@@ -280,7 +281,7 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = playlistRepository.entries(playlist.id).first().map { it.song }
             if (songs.isNotEmpty()) {
-                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = playlist.name)
+                player.playQueue(if (shuffled) songs.shuffled() else songs, 0, source = playlist.name, kind = if (playlist.isFavourites) QueueSourceKind.Favourites else QueueSourceKind.Playlist)
             }
         }
     }
