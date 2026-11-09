@@ -70,6 +70,7 @@ import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
@@ -368,7 +369,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                                         entryProvider = tabEntries,
                                         transitionSpec = { if (targetState.isCoverPage()) coverPushTransition() else pushTransition() },
                                         popTransitionSpec = { backTransition(gesture = false) },
-                                        predictivePopTransitionSpec = { backTransition(gesture = true) },
+                                        predictivePopTransitionSpec = { edge -> backTransition(gesture = true, fromRight = edge == NavigationEvent.EDGE_RIGHT) },
                                     )
                                 }
                             }
@@ -443,18 +444,23 @@ private fun pushTransition(): ContentTransform =
  * page shrinks and moves only a little over the drag ([BackDrag]), and letting go carries it the rest of the way out, along the same
  * curve ([BackFlyOut]). The arrow, with no finger, uses a decelerating curve.
  */
-private fun backTransition(gesture: Boolean): ContentTransform {
+private fun backTransition(gesture: Boolean, fromRight: Boolean = false): ContentTransform {
+    // A swipe from the right edge sends the page off to the left.
+    val dir = if (fromRight) -1 else 1
     val ms = if (gesture) GestureMs else BackMs
     val move = if (gesture) BackFlyOut else BackDecelerate
     val shape = if (gesture) BackDrag else BackDecelerate
-    val enter = slideInHorizontally(tween(ms, easing = move)) { -it / 5 } + fadeIn(tween(ms, easing = shape), initialAlpha = 0.6f)
-    val exit = slideOutHorizontally(tween(ms, easing = move)) { it } + scaleOut(tween(ms, easing = shape), targetScale = BackScale)
+    val enter = slideInHorizontally(tween(ms, easing = move)) { -dir * it / 5 } + fadeIn(tween(ms, easing = shape), initialAlpha = 0.6f)
+    val exit = slideOutHorizontally(tween(ms, easing = move)) { dir * it } + scaleOut(tween(ms, easing = shape), targetScale = BackScale)
     // The page going away stays on top of the one below it.
     return ContentTransform(enter, exit, targetContentZIndex = -1f)
 }
 
-/** Follows the finger to a third of the way over the first half of the gesture, then lets go quickly: fast out, soft end. */
-private val BackFlyOut = Easing { x -> if (x < 0.5f) 0.33f * (x / 0.5f) else 0.33f + 0.67f * (1f - (1f - (x - 0.5f) / 0.5f).let { it * it }) }
+/**
+ * Under the finger the page only leans a little (8% of its travel over the first half of the gesture): it leaves the screen after the
+ * finger lets go, which carries on from wherever it was along the rest of the curve: fast out, soft end.
+ */
+private val BackFlyOut = Easing { x -> if (x < 0.5f) 0.08f * (x / 0.5f) else 0.08f + 0.92f * (1f - (1f - (x - 0.5f) / 0.5f).let { it * it }) }
 
 /** Reaches its end over the first 40% of the gesture and holds (the shrink and the rounding settle while the finger is still down). */
 private val BackDrag = Easing { x -> (x / 0.4f).coerceAtMost(1f) }
