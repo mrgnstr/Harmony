@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.mrgnstr.harmony.core.model.DownloadQuality
 import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
@@ -90,6 +91,9 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     private val sourceModeKey = stringPreferencesKey("library_source_mode")
     private val wifiQualityKey = stringPreferencesKey("wifi_stream_quality")
     private val mobileQualityKey = stringPreferencesKey("mobile_stream_quality")
+    private val downloadQualityKey = stringPreferencesKey("download_quality")
+    private val transcodeAllowlistKey = stringSetPreferencesKey("download_transcode_formats")
+    private val transcodeAllowlistEnabledKey = booleanPreferencesKey("transcode_allowlist_enabled")
     private val replayGainModeKey = stringPreferencesKey("replay_gain_mode")
     private val nightcoreKey = booleanPreferencesKey("nightcore")
     private val nightcoreSpeedKey = floatPreferencesKey("nightcore_speed")
@@ -120,6 +124,28 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setMobileStreamQuality(quality: StreamQuality) {
         context.settingsDataStore.edit { it[mobileQualityKey] = quality.name }
+    }
+
+    val downloadQuality: Flow<DownloadQuality> = context.settingsDataStore.data.map { prefs ->
+        prefs[downloadQualityKey]?.let { s -> DownloadQuality.entries.firstOrNull { it.name == s } } ?: DownloadQuality.Original
+    }
+
+    suspend fun setDownloadQuality(quality: DownloadQuality) {
+        context.settingsDataStore.edit { it[downloadQualityKey] = quality.name }
+    }
+
+    /** Lower-case names of the formats the server may convert, for streaming and downloads (any other format is sent as it is). FLAC until chosen. */
+    val transcodeAllowlist: Flow<Set<String>> = context.settingsDataStore.data.map { it[transcodeAllowlistKey] ?: setOf("flac") }
+
+    suspend fun setTranscodeAllowlist(formats: Set<String>) {
+        context.settingsDataStore.edit { it[transcodeAllowlistKey] = formats }
+    }
+
+    /** Off: every format is converted, Dolby Atmos included, and the allowlist is ignored. */
+    val transcodeAllowlistEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[transcodeAllowlistEnabledKey] != false }
+
+    suspend fun setTranscodeAllowlistEnabled(on: Boolean) {
+        context.settingsDataStore.edit { it[transcodeAllowlistEnabledKey] = on }
     }
 
     /** Nightcore: every song plays [com.mrgnstr.harmony.core.playback.NightcoreSpeed] times faster with its pitch raised by the same factor. */

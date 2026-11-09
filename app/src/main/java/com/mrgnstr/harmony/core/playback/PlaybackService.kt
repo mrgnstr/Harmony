@@ -48,6 +48,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var queueRestorer: QueueRestorer
     @Inject lateinit var navidrome: NavidromeRepository
     @Inject lateinit var settings: SettingsStore
+    @Inject lateinit var transcodePolicy: com.mrgnstr.harmony.core.data.TranscodePolicy
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private var session: MediaSession? = null
@@ -61,7 +62,26 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Streams of a remote song are asked for in the Wi-Fi / Mobile quality unless the song's format must stay as it is (see TranscodePolicy).
+        val dataSources = androidx.media3.datasource.DefaultDataSource.Factory(
+            this,
+            androidx.media3.datasource.ResolvingDataSource.Factory(androidx.media3.datasource.DefaultHttpDataSource.Factory()) { spec ->
+                val uri = spec.uri
+                val id = uri.getQueryParameter("id")
+                if (uri.scheme?.startsWith("http") != true || uri.path?.endsWith("/rest/stream") != true || id == null ||
+                    uri.getQueryParameter("maxBitRate") != null || uri.getQueryParameter("format") != null
+                ) return@Factory spec
+                val quality = kotlinx.coroutines.runBlocking { transcodePolicy.streamQuality(id) } ?: return@Factory spec
+                spec.withUri(
+                    uri.buildUpon()
+                        .appendQueryParameter("maxBitRate", quality.maxBitRateKbps.toString())
+                        .appendQueryParameter("format", quality.preferredFormat)
+                        .build(),
+                )
+            },
+        )
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

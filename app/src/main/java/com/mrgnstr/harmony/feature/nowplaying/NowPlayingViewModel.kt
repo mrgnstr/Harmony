@@ -45,6 +45,7 @@ class NowPlayingViewModel @Inject constructor(
     private val diffusedArt: com.mrgnstr.harmony.core.artwork.DiffusedArtCache,
     private val libraryRepository: LibraryRepository,
     private val formatProbe: AudioFormatProbe,
+    private val transcodePolicy: com.mrgnstr.harmony.core.data.TranscodePolicy,
     private val settings: com.mrgnstr.harmony.core.datastore.SettingsStore,
     val navidrome: NavidromeRepository,
 ) : ViewModel() {
@@ -84,7 +85,10 @@ class NowPlayingViewModel @Inject constructor(
                     // Navidrome mis-reads Atmos (E-AC-3 JOC) .m4a as stereo AAC: the stream's own header decides for the MP4 family.
                     val stream = s.streamUri?.takeIf { s.codec == "AAC" || s.codec == "ALAC" }
                     val probed = stream?.let { formatProbe.probeRemote(s.id, it) }?.let { f -> if (f.bitRateKbps > 0) f else f.copy(bitRateKbps = s.bitRateKbps) }
-                    probed ?: s.codec?.let { AudioFormat(it, s.lossless, s.sampleRateHz, s.bitDepth, s.channels, s.bitRateKbps) }
+                    // A stream converted by the server is what plays, not the file's own format (a downloaded copy is already what it is).
+                    val converted = if (s.downloadedPath == null) transcodePolicy.streamQuality(s) else null
+                    if (converted != null) AudioFormat(AudioFormat.codecName("audio/${converted.preferredFormat}"), false, 0, 0, 2, converted.maxBitRateKbps)
+                    else probed ?: s.codec?.let { AudioFormat(it, s.lossless, s.sampleRateHz, s.bitDepth, s.channels, s.bitRateKbps) }
                 }
             }?.pill
         }

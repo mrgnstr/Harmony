@@ -7,8 +7,21 @@ import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.Genre
 import kotlinx.coroutines.flow.Flow
 
+/** How many of a server's songs carry [codec] as the server tags them. */
+data class CodecCount(val codec: String?, val n: Int)
+
+/** A remote song's id and stream URL. */
+data class StreamRef(val id: Long, val streamUri: String?)
+
 @Dao
 interface SongDao {
+    @Query("SELECT codec, COUNT(*) AS n FROM songs WHERE serverId > 0 GROUP BY codec")
+    suspend fun remoteCodecCounts(): List<CodecCount>
+
+    /** Songs whose tag can't be trusted: Navidrome reads Atmos (E-AC-3 JOC) .m4a as AAC or nothing. */
+    @Query("SELECT id, streamUri FROM songs WHERE serverId > 0 AND (codec IS NULL OR UPPER(codec) IN ('AAC', 'ALAC'))")
+    suspend fun remoteAmbiguousSongs(): List<StreamRef>
+
     @Query("SELECT * FROM songs ORDER BY title COLLATE NOCASE ASC")
     fun observeAll(): Flow<List<SongEntity>>
 
@@ -38,6 +51,9 @@ interface SongDao {
 
     @Query("SELECT id, dateModifiedSec, genre, year, lossless FROM songs WHERE serverId = :serverId")
     suspend fun remoteStamps(serverId: Long): List<SongStamp>
+
+    @Query("SELECT * FROM songs WHERE remoteId = :remoteId LIMIT 1")
+    suspend fun byRemoteId(remoteId: String): SongEntity?
 
     @Query("SELECT * FROM songs WHERE id = :id")
     suspend fun getById(id: Long): SongEntity?

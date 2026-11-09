@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -40,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +78,7 @@ import com.mrgnstr.harmony.core.model.ReplayGainMode
 import com.mrgnstr.harmony.core.model.ScanStatusInfo
 import com.mrgnstr.harmony.core.model.ServerAccount
 import com.mrgnstr.harmony.core.model.ShareLink
+import com.mrgnstr.harmony.core.model.DownloadQuality
 import com.mrgnstr.harmony.core.model.StreamQuality
 import com.mrgnstr.harmony.core.model.ThemeMode
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -109,6 +113,16 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreamQuality.Lossless)
     val mobileQuality: StateFlow<StreamQuality> = settings.mobileStreamQuality
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreamQuality.Balanced)
+    val downloadQuality: StateFlow<DownloadQuality> = settings.downloadQuality
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.Original)
+    val transcodeFormats: StateFlow<Set<String>> = settings.transcodeAllowlist
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), setOf("flac"))
+    fun setDownloadQuality(quality: DownloadQuality) { viewModelScope.launch { settings.setDownloadQuality(quality) } }
+    fun setTranscodeFormats(formats: Set<String>) { viewModelScope.launch { settings.setTranscodeAllowlist(formats) } }
+    val allowlistEnabled: StateFlow<Boolean> = settings.transcodeAllowlistEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    fun setAllowlistEnabled(on: Boolean) { viewModelScope.launch { settings.setTranscodeAllowlistEnabled(on) } }
+
     val replayGainMode: StateFlow<ReplayGainMode> = settings.replayGainMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReplayGainMode.Smart)
     val replayGainPreampDb: StateFlow<Float> = settings.replayGainPreampDb
@@ -171,6 +185,11 @@ fun SettingsRoute(
     val sourceMode by viewModel.sourceMode.collectAsStateWithLifecycle()
     val wifiQuality by viewModel.wifiQuality.collectAsStateWithLifecycle()
     val mobileQuality by viewModel.mobileQuality.collectAsStateWithLifecycle()
+    val downloadQuality by viewModel.downloadQuality.collectAsStateWithLifecycle()
+    val transcodeFormats by viewModel.transcodeFormats.collectAsStateWithLifecycle()
+    val allowlistEnabled by viewModel.allowlistEnabled.collectAsStateWithLifecycle()
+    val downloadQueue by viewModel.downloads.queue.collectAsStateWithLifecycle()
+    var showFormatsDialog by remember { mutableStateOf(false) }
     val rgMode by viewModel.replayGainMode.collectAsStateWithLifecycle()
     val rgPreamp by viewModel.replayGainPreampDb.collectAsStateWithLifecycle()
     val scrobble by viewModel.scrobbleToServer.collectAsStateWithLifecycle()
@@ -358,6 +377,30 @@ fun SettingsRoute(
                         onSelect = viewModel::setMobileQuality,
                     )
                     DropdownSettingRow(
+                        title = "Download Quality",
+                        subtitle = downloadQuality.label,
+                        options = DownloadQuality.entries,
+                        selected = downloadQuality,
+                        optionLabel = { it.label },
+                        onSelect = viewModel::setDownloadQuality,
+                    )
+                    if (downloadQuality != DownloadQuality.Original || wifiQuality.maxBitRateKbps > 0 || mobileQuality.maxBitRateKbps > 0) {
+                        // Tapping the row picks the formats; the switch on its own side of the divider turns the allowlist off.
+                        MediaRow(
+                            title = "Transcoding Allowlist",
+                            subtitle = if (allowlistEnabled) {
+                                transcodeFormats.takeIf { it.isNotEmpty() }
+                                    ?.joinToString(", ") { if (it == "dolby atmos") "Dolby Atmos" else it.uppercase() }
+                                    ?: "No formats: everything stays as it is"
+                            } else "All songs are transcoded",
+                            onClick = { showFormatsDialog = true },
+                            trailing = {
+                                VerticalDivider(Modifier.height(32.dp))
+                                Switch(checked = allowlistEnabled, onCheckedChange = viewModel::setAllowlistEnabled, modifier = Modifier.padding(horizontal = 12.dp))
+                            },
+                        )
+                    }
+                    DropdownSettingRow(
                         title = "ReplayGain Normalization",
                         subtitle = rgMode.label,
                         options = ReplayGainMode.entries,
@@ -458,7 +501,7 @@ fun SettingsRoute(
                         val mb = downloadedBytes / (1024 * 1024)
                         MediaRow(
                             title = "Clear Offline Downloads",
-                            subtitle = "$mb MB used on this device",
+                            subtitle = if (downloadQueue.total > 0) "Downloading ${downloadQueue.done + 1} of ${downloadQueue.total}" else "$mb MB used on this device",
                             leading = { SymbolIcon(Symbols.OfflinePin, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = {
                                 scope.launch {
@@ -579,6 +622,14 @@ fun SettingsRoute(
         NavidromeConnectSheet(onDismiss = { showConnectSheet = false })
     }
 
+    if (showFormatsDialog) {
+        TranscodeFormatsDialog(
+            scan = viewModel.downloads,
+            selected = transcodeFormats,
+            onChange = viewModel::setTranscodeFormats,
+            onDismiss = { showFormatsDialog = false },
+        )
+    }
     if (showQuickConnectAuthorize) {
         QuickConnectAuthorizeDialog(
             onDismiss = { showQuickConnectAuthorize = false },
@@ -653,6 +704,44 @@ private fun SwitchSettingRow(
         trailing = {
             Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = Modifier.padding(end = 12.dp))
         },
+    )
+}
+
+/** The formats the server really has (scanned the first time), each with a tick for "convert on download". */
+@Composable
+private fun TranscodeFormatsDialog(
+    scan: OfflineDownloadManager,
+    selected: Set<String>,
+    onChange: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val formats by scan.formats.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { scan.scanFormats() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Transcoding Allowlist") },
+        text = {
+            Column {
+                Text(
+                    "Songs in a ticked format are converted when streamed or downloaded (see the quality settings); every other format is sent as it is.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (formats == null) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 16.dp))
+                    Text("Checking the library's formats…", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+                }
+                formats?.forEach { (name, count) ->
+                    val key = name.lowercase()
+                    MediaRow(
+                        title = name,
+                        subtitle = "$count ${if (count == 1) "song" else "songs"}",
+                        onClick = { onChange(if (key in selected) selected - key else selected + key) },
+                        trailing = { Checkbox(checked = key in selected, onCheckedChange = { onChange(if (it) selected + key else selected - key) }) },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
 

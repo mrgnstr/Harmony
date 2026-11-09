@@ -115,6 +115,14 @@ enum class StreamQuality(val label: String, val maxBitRateKbps: Int, val preferr
     ServerDefault("Server Default", -1, ""),
 }
 
+/** What offline downloads are converted to on the server; only formats the user ticked are converted, the rest download as they are. */
+enum class DownloadQuality(val label: String, val bitrateKbps: Int) {
+    Original("Original (no conversion)", 0),
+    Opus320("Opus 320 kbps", 320),
+    Opus192("Opus 192 kbps", 192),
+    Opus128("Opus 128 kbps", 128),
+}
+
 /** ReplayGain loudness normalization mode. */
 enum class ReplayGainMode(val label: String) {
     Off("Off"),

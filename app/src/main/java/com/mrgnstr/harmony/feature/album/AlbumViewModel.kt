@@ -214,6 +214,10 @@ class AlbumViewModel @AssistedInject constructor(
 
     fun addToNewPlaylist(name: String, songs: List<Song>) { viewModelScope.launch { playlistRepository.create(name, songIds = songs.map { it.id }) } }
 
+    val downloadProgress = downloads.progress
+    val downloadQueue = downloads.queue
+    val downloadFailed = downloads.failed
+
     fun downloadAlbum() { downloads.downloadSongs(state.value.songs) }
 
     suspend fun createShare(description: String, downloadable: Boolean): ShareLink? =

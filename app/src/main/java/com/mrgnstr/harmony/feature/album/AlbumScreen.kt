@@ -29,7 +29,9 @@ import androidx.compose.foundation.background
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -115,6 +117,9 @@ fun AlbumRoute(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val downloading by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val queue by viewModel.downloadQueue.collectAsStateWithLifecycle()
+    val failed by viewModel.downloadFailed.collectAsStateWithLifecycle()
     PageColorSource(state.accent?.let { ColorSource.Seed(it) })
 
     val listState = rememberLazyListState()
@@ -150,9 +155,17 @@ fun AlbumRoute(
                     item(key = "actions", contentType = "actions") {
                         PlayShuffleButtons({ viewModel.play(state.songs, 0) }, { viewModel.shuffle(state.songs) }, Modifier.padding(top = 20.dp, bottom = 12.dp))
                     }
+                    if (queue.total > 0 && state.songs.any { it.id in downloading }) {
+                        item(key = "downloads", contentType = "downloads") {
+                            Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp)) {
+                                Text("Downloading ${queue.done + 1} of ${queue.total}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                LinearProgressIndicator({ queue.done.toFloat() / queue.total }, Modifier.fillMaxWidth().padding(top = 6.dp))
+                            }
+                        }
+                    }
                     // Composing the rest while the page is still flying in costs frames; it follows once the transition has settled.
                     if (settled) {
-                        trackList(state, viewModel, onOpenArtist) { playlistFor = it }
+                        trackList(state, viewModel, downloading, failed, onOpenArtist) { playlistFor = it }
                         item(key = "info", contentType = "info") { InfoCard(state, viewModel.lastFm.collectAsStateWithLifecycle().value, onOpenArtist) }
                         if (state.otherVersions.isNotEmpty()) shelf("versions", "Other Versions", state.otherVersions, { onOpenShelf(AlbumReleaseShelf.OtherVersions, state.accent) }, onOpenAlbum)
                         if (state.moreByArtist.isNotEmpty()) {
@@ -282,7 +295,7 @@ private fun Tag(text: String, icon: FormatIcon?) {
     }
 }
 
-private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewModel, onOpenArtist: (String) -> Unit, onAddToPlaylist: (List<Song>) -> Unit) {
+private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewModel, downloading: Map<Long, Float>, failed: Set<Long>, onOpenArtist: (String) -> Unit, onAddToPlaylist: (List<Song>) -> Unit) {
     val songs = state.songs
     val discTitleMap = state.remoteExtra?.discTitles?.associate { it.disc to it.title }.orEmpty()
     songs.forEachIndexed { index, song ->
@@ -293,7 +306,7 @@ private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewMod
         }
         item(key = "song:${song.id}", contentType = "track") {
             TrackRow(
-                song, position = index + 1, playing = song.id == state.playingId, albumArtist = state.artist, favourite = song.id in state.favouriteSongs,
+                song, position = index + 1, playing = song.id == state.playingId, albumArtist = state.artist, favourite = song.id in state.favouriteSongs, download = downloading[song.id], downloadFailed = song.id in failed,
                 onClick = { viewModel.play(songs, index) },
                 onPlayNext = { viewModel.playNext(listOf(song)) },
                 onAddToQueue = { viewModel.addToQueue(listOf(song)) },
@@ -322,6 +335,8 @@ private fun TrackRow(
     playing: Boolean,
     albumArtist: String,
     favourite: Boolean,
+    download: Float?,
+    downloadFailed: Boolean,
     onClick: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -361,6 +376,12 @@ private fun TrackRow(
                 }
             }
             if (favourite) SymbolIcon(Symbols.Favorite, "Favourite", Modifier.padding(start = 8.dp), size = 16.dp, tint = accent, fill = 1f)
+            if (download != null) {
+                if (download < 0f) CircularProgressIndicator(Modifier.padding(start = 8.dp).size(16.dp), strokeWidth = 2.dp)
+                else CircularProgressIndicator({ download }, Modifier.padding(start = 8.dp).size(16.dp), strokeWidth = 2.dp)
+            }
+            else if (downloadFailed) SymbolIcon(Symbols.Error, "Download failed", Modifier.padding(start = 8.dp), size = 16.dp, tint = MaterialTheme.colorScheme.error)
+            else if (song.downloadedPath != null) SymbolIcon(Symbols.DownloadDone, "Downloaded", Modifier.padding(start = 8.dp), size = 16.dp, tint = muted)
             Text(clock(song.durationMs), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium, color = muted)
             IconButton({ menu = true }) { SymbolIcon(Symbols.MoreVert, "More", tint = muted) }
         }
