@@ -23,6 +23,7 @@ import com.mrgnstr.harmony.core.datastore.SettingsStore
 import com.mrgnstr.harmony.core.designsystem.theme.SchemeFactory
 import com.mrgnstr.harmony.core.device.DeviceCapabilities
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.TabBarSide
 import com.mrgnstr.harmony.core.model.ThemeMode
 import com.mrgnstr.harmony.core.playback.EXTRA_OPEN_PLAYER
 import dagger.hilt.android.AndroidEntryPoint
@@ -38,16 +39,18 @@ class MainActivity : ComponentActivity() {
     private var themeMode by mutableStateOf<ThemeMode?>(null)
     private var chromeBlur by mutableStateOf<BlurMode?>(null)
     private var coverBlur by mutableStateOf<BlurMode?>(null)
+    private var tabBarSide by mutableStateOf<TabBarSide?>(null)
     /** Bumped each time the notification asks for Now Playing. */
     private var openPlayer by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen().setKeepOnScreenCondition { themeMode == null || chromeBlur == null || coverBlur == null }
+        installSplashScreen().setKeepOnScreenCondition { themeMode == null || chromeBlur == null || coverBlur == null || tabBarSide == null }
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handle(intent)
         lifecycleScope.launch { settings.themeMode.collect { themeMode = it } }
         lifecycleScope.launch { settings.glassBlur.collect { chromeBlur = it } }
         lifecycleScope.launch { settings.coverBlur.collect { coverBlur = it } }
+        lifecycleScope.launch { settings.tabBarSide.collect { tabBarSide = it } }
         setContent {
             val dark = when (themeMode ?: ThemeMode.System) {
                 ThemeMode.System -> isSystemInDarkTheme()
@@ -57,7 +60,7 @@ class MainActivity : ComponentActivity() {
             SystemBars(dark)
             val context = LocalContext.current
             val schemes = remember(context) { SchemeFactory(context) }
-            HarmonyApp(dark, capabilities.tier, chromeBlur ?: BlurMode.Auto, coverBlur ?: BlurMode.Auto, schemes, openPlayer)
+            HarmonyApp(dark, capabilities.tier, chromeBlur ?: BlurMode.Auto, coverBlur ?: BlurMode.Auto, schemes, openPlayer, tabBarSide ?: TabBarSide.Left)
         }
     }
 

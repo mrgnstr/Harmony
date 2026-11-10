@@ -33,6 +33,16 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
+import com.mrgnstr.harmony.core.designsystem.LocalWindowLayout
+import com.mrgnstr.harmony.core.designsystem.SideInsets
+import com.mrgnstr.harmony.core.designsystem.blur.FloatingChromeMargin
+import com.mrgnstr.harmony.core.designsystem.rememberWindowLayout
+import com.mrgnstr.harmony.core.model.TabBarSide
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,6 +54,7 @@ import com.mrgnstr.harmony.feature.nowplaying.MiniPlayerHeight
 import com.mrgnstr.harmony.feature.nowplaying.NowPlayingViewModel
 import com.mrgnstr.harmony.feature.nowplaying.PlayerSheet
 import com.mrgnstr.harmony.feature.nowplaying.rememberPlayerSheetState
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,6 +93,7 @@ import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
 import com.mrgnstr.harmony.core.designsystem.LocalOpenAlbum
 import com.mrgnstr.harmony.core.designsystem.LocalOpenArtist
 import com.mrgnstr.harmony.core.designsystem.LocalSharedTransitionScope
+import com.mrgnstr.harmony.core.designsystem.components.TopBarRowHeight
 import com.mrgnstr.harmony.core.designsystem.components.CoverShare
 import com.mrgnstr.harmony.core.designsystem.components.LocalCoverShare
 import com.mrgnstr.harmony.core.designsystem.blur.LocalChromeBlurState
@@ -155,16 +167,20 @@ private const val ChromeBlendSteps = 8
  * theme on every page change cost ~20 ms per blend step, and now only the bar and mini player are under the blending theme.
  */
 @Composable
-fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur: BlurMode, schemes: SchemeFactory, openPlayer: Int = 0) {
+fun HarmonyApp(
+    dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur: BlurMode, schemes: SchemeFactory, openPlayer: Int = 0,
+    tabBarSide: TabBarSide = TabBarSide.Left,
+) {
     val nav = rememberTabNavigator()
     val registry = rememberColorSourceRegistry()
+    val windowLayout = rememberWindowLayout()
 
     HarmonyTheme(schemes.scheme(ColorSource.Wallpaper, dark), tier, chromeBlur, coverBlur) {
-        CompositionLocalProvider(LocalColorSourceRegistry provides registry) {
+        CompositionLocalProvider(LocalColorSourceRegistry provides registry, LocalWindowLayout provides windowLayout) {
             val permission = rememberAudioPermissionState()
             val connectVm: com.mrgnstr.harmony.core.designsystem.components.NavidromeConnectViewModel = hiltViewModel()
             val activeServer by connectVm.repository.activeAccount.collectAsStateWithLifecycle()
-            if (permission.granted || activeServer != null) ProvideOfflineDim { Shell(nav, openPlayer, schemes, dark) } else OnboardingScreen(permission)
+            if (permission.granted || activeServer != null) ProvideOfflineDim { Shell(nav, openPlayer, schemes, dark, tabBarSide) } else OnboardingScreen(permission)
         }
     }
 }
@@ -201,13 +217,39 @@ private fun rememberBackProgress(): State<Float?> {
 }
 
 @Composable
-private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, dark: Boolean) {
+private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, dark: Boolean, tabBarSide: TabBarSide) {
     val app = hiltViewModel<AppViewModel>()
     NotificationPermissionEffect()
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
     val blur = rememberChromeBlurState()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val barTop = navBottom + AppBarEdgeGap + AppBarHeight
+    // Wide layouts (tablets, phones on their side): the bar stands on a side, Search on top and Home at the bottom, and the mini player
+    // sits on the bar's bottom row beside it. Phones' side is their own bottom edge (WindowLayout.barSide), tablets' the setting.
+    val windowLayout = LocalWindowLayout.current
+    val vertical = windowLayout.sideChrome
+    val barSide = windowLayout.barSide(tabBarSide)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+    val safeLeft = with(density) { WindowInsets.safeDrawing.getLeft(density, layoutDirection).toDp() }
+    val safeRight = with(density) { WindowInsets.safeDrawing.getRight(density, layoutDirection).toDp() }
+    // What pages keep clear of at the sides: the cutout / side navigation bar, and the bar's rail on its side.
+    // The side bar is as long as it can be (its maximum, or less where the screen is short): the height between the bottom gap and the
+    // top bar's collapsed row, which is where it would first run into a page's title bar (the expanded title row is in the page's own way).
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val windowHeight = with(density) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.height.toDp() }
+    val slotLength = sideBarSlotLength(windowHeight - statusTop - TopBarRowHeight - 8.dp - navBottom - AppBarEdgeGap)
+    // Centred on the screen when it can be without touching the collapsed top bar (or the bottom gap); otherwise as far down as it goes.
+    val bottomGap = navBottom + AppBarEdgeGap
+    val barLength = AppBarHeight + BarGap + slotLength * 2
+    val centredGap = (windowHeight - barLength) / 2
+    val sideBarBottom = if (centredGap >= statusTop + TopBarRowHeight + 8.dp && centredGap >= bottomGap) centredGap else bottomGap
+    // The mini player sits beside the bar only while the bar comes down into its row.
+    val barBesideMini = sideBarBottom < bottomGap + AppBarHeight + BarGap
+    val rail = FloatingChromeMargin + AppBarHeight + FloatingChromeMargin
+    val sideInsets = if (vertical) {
+        SideInsets(left = safeLeft + if (barSide == TabBarSide.Left) rail else 0.dp, right = safeRight + if (barSide == TabBarSide.Right) rail else 0.dp)
+    } else SideInsets()
     val player = hiltViewModel<NowPlayingViewModel>()
     val hasMedia by player.snapshot.collectAsStateWithLifecycle().let { st -> androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { st.value.hasMedia } } }
     val sheet = rememberPlayerSheetState()
@@ -225,9 +267,10 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     // The tab bar minimizes to the selected tab's circle while the pages scroll down (iOS 26), and the mini player moves in beside it.
     val minimize = rememberBarMinimize()
     // Only with a mini player: without one the bar stays whole (and goes back to whole when the last song is cleared).
-    LaunchedEffect(hasMedia) {
-        minimize.enabled = hasMedia
-        if (!hasMedia) minimize.expand()
+    // (Nor in wide layouts: the bar stands on a side there and takes no room from the content to give back.)
+    LaunchedEffect(hasMedia, vertical) {
+        minimize.enabled = hasMedia && !vertical
+        if (!hasMedia || vertical) minimize.expand()
     }
     val barMinimize = remember { Animatable(0f) }
     val minimized = minimize.minimized && nav.current != Tab.Search
@@ -243,8 +286,8 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     androidx.compose.runtime.LaunchedEffect(openPlayer) { if (openPlayer > 0) sheet.expand() }
     var rootHeightPx by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     // Pages pad for the tab bar only: scrolled to the end the bar is minimized and the mini player sits in its row, so no room is kept
-    // for the mini player above it.
-    val bottomInset = barTop
+    // for the mini player above it. In a wide layout the bar is at the side: only the mini player's row is kept (when there is one).
+    val bottomInset = if (vertical && !hasMedia) navBottom else barTop
 
     val entries = remember(nav) {
         val openSettings = { nav.push(Dest.Settings); Unit }
@@ -357,6 +400,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     val openArtistGlobal = remember(nav) { { artist: String -> nav.push(Dest.Artist(artist)); Unit } }
     CompositionLocalProvider(
         LocalBottomBarInset provides bottomInset,
+        LocalSideInsets provides sideInsets,
         LocalChromeBlurState provides blur,
         LocalCoverShare provides coverShare,
         LocalOpenAlbum provides openAlbumGlobal,
@@ -408,10 +452,23 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                             fold = { barFold.value },
                             onSearchAgain = minimize::expand,
                             sideSlide = { sheet.progress.value.coerceIn(0f, 1f) },
-                            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
+                            vertical = vertical,
+                            slotLength = slotLength,
+                            modifier = (if (vertical) {
+                                Modifier
+                                    .align(if (barSide == TabBarSide.Left) Alignment.BottomStart else Alignment.BottomEnd)
+                                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                    .padding(start = FloatingChromeMargin, end = FloatingChromeMargin, bottom = sideBarBottom)
+                            } else Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap))
                                 // The open player slides the bar off the bottom; a mini player thrown down pushes it the same way (capped), and
                                 // once the pill is gone the push springs back on its own.
                                 .graphicsLayer {
+                                    if (vertical) {
+                                        // The open player pushes the bar off its own side.
+                                        val away = sheet.progress.value.coerceIn(0f, 1f) * (if (barSide == TabBarSide.Left) sideInsets.left else sideInsets.right).toPx()
+                                        translationX = if (barSide == TabBarSide.Left) -away else away
+                                        return@graphicsLayer
+                                    }
                                     // Minimized, the bar's buttons leave to the sides instead (AppBar's sideSlide), so it does not also go down.
                                     val docked = maxOf(barMinimize.value, barFold.value)
                                     val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx() * (1f - docked)
@@ -423,7 +480,17 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                         PlayerSheet(
                             sheet, restingBottom = barTop + MiniPlayerGap, blur = blur,
                             onThrownDown = minimize::collapse,
-                            dock = MiniDock({ maxOf(barMinimize.value, barFold.value) }, drop = MiniPlayerGap + AppBarHeight, left = AppBarHeight + BarGap, right = AppBarHeight + BarGap, fold = { barFold.value }),
+                            dock = if (vertical) {
+                                // Always on the bar's bottom row, beside the bar's column and as wide as what is left (so the next button stays).
+                                MiniDock(
+                                    { 1f }, drop = MiniPlayerGap + AppBarHeight,
+                                    left = safeLeft + if (barBesideMini && barSide == TabBarSide.Left) AppBarHeight + BarGap else 0.dp,
+                                    right = safeRight + if (barBesideMini && barSide == TabBarSide.Right) AppBarHeight + BarGap else 0.dp,
+                                    compact = false,
+                                    // The pill is as wide as it is when the device is upright: its shorter side, less the margins.
+                                    maxWidth = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp.dp - FloatingChromeMargin * 2,
+                                )
+                            } else MiniDock({ maxOf(barMinimize.value, barFold.value) }, drop = MiniPlayerGap + AppBarHeight, left = AppBarHeight + BarGap, right = AppBarHeight + BarGap, fold = { barFold.value }),
                         )
                     }
                 }

@@ -53,6 +53,8 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import kotlin.math.roundToInt
 
 private val BarRow = 64.dp
+/** The collapsed top bar's row under the status bar. */
+val TopBarRowHeight: Dp get() = BarRow
 // Compact rows match the 64 dp Artist/Album detail bar.
 private val TitleExtra = 44.dp
 private val SubtitleExtra = 20.dp

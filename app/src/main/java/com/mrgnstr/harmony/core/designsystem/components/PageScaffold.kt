@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 
 /**
@@ -31,7 +32,7 @@ fun PageScaffold(
         LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
-            contentPadding = PaddingValues(top = LocalTopBarInset.current, bottom = LocalBottomBarInset.current + 16.dp),
+            contentPadding = LocalSideInsets.current.padding(top = LocalTopBarInset.current, bottom = LocalBottomBarInset.current + 16.dp),
             content = content,
         )
     }

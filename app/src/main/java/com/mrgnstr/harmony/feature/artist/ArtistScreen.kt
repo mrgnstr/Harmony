@@ -85,8 +85,11 @@ fun ArtistRoute(
                         item("top:title", contentType = "heading") {
                             SectionHeading("Top Songs", onMore = openAllSongs)
                         }
-                        itemsIndexed(state.rankedSongs.take(5), key = { _, song -> "top:${song.id}" }, contentType = { _, _ -> "song" }) { i, song ->
-                            ArtistSongRow(song, song.id == state.playingId, { viewModel.play(state.rankedSongs, i) }, viewModel)
+                        // All of them, ranked, in columns of five that scroll sideways.
+                        item("top:shelf", contentType = "shelf") {
+                            ColumnsShelf(state.rankedSongs, key = { "top:${it.id}" }) { song, i ->
+                                ArtistSongRow(song, song.id == state.playingId, { viewModel.play(state.rankedSongs, i) }, viewModel)
+                            }
                         }
                     }
                     ArtistReleaseShelf.entries.forEach { section ->

@@ -13,6 +13,7 @@ import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.TabBarSide
 import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.ReplayGainMode
 import com.mrgnstr.harmony.core.model.StreamQuality
@@ -52,6 +53,15 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     suspend fun setGlassBlur(mode: BlurMode) { context.settingsDataStore.edit { it[glassBlurKey] = mode.name } }
 
     suspend fun setCoverBlur(mode: BlurMode) { context.settingsDataStore.edit { it[coverBlurKey] = mode.name } }
+
+    private val tabBarSideKey = stringPreferencesKey("tab_bar_side")
+
+    /** Which side the tab bar stands on, on tablets (phones are locked to their bottom edge, whatever this says). */
+    val tabBarSide: Flow<TabBarSide> = context.settingsDataStore.data.map { prefs ->
+        TabBarSide.entries.firstOrNull { it.name == prefs[tabBarSideKey] } ?: TabBarSide.Left
+    }
+
+    suspend fun setTabBarSide(side: TabBarSide) { context.settingsDataStore.edit { it[tabBarSideKey] = side.name } }
 
     private val lyricsPriorityKey = stringPreferencesKey("lyrics_priority")
 

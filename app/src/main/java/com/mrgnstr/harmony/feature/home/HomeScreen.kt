@@ -47,6 +47,7 @@ import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.components.AlbumGridPage
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
+import com.mrgnstr.harmony.core.designsystem.components.ColumnsShelf
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.components.SectionHeading
 import com.mrgnstr.harmony.core.designsystem.components.ShelfTileWidth
@@ -211,21 +212,19 @@ fun HomeRoute(
                     item(key = "fav-songs:heading", contentType = "heading") {
                         SectionHeading("Favourite Songs", onMore = { onOpenPlaylist(FAVOURITES_PLAYLIST_ID) })
                     }
-                    itemsIndexed(
-                        state.favouriteSongs,
-                        key = { _, s -> "fav-song:${s.id}" },
-                        contentType = { _, _ -> "song" },
-                    ) { index, song ->
-                        val subtitle = remember(song.artist, song.album) {
-                            listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
+                    // Every favourite, in columns of five that scroll sideways (as many columns beside each other as the width allows).
+                    item(key = "fav-songs:shelf", contentType = "shelf") {
+                        ColumnsShelf(state.allFavouriteSongs, key = { "fav-song:${it.id}" }) { song, index ->
+                            val subtitle = remember(song.artist, song.album) {
+                                listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
+                            }
+                            SongRow(
+                                song = song,
+                                onClick = { viewModel.playFavourite(index) },
+                                subtitle = subtitle,
+                                playing = song.id == state.playingId,
+                            )
                         }
-                        SongRow(
-                            song = song,
-                            onClick = { viewModel.playFavourite(index) },
-                            subtitle = subtitle,
-                            playing = song.id == state.playingId,
-                            modifier = itemMotion(),
-                        )
                     }
                 }
                 albumShelf(

@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarCollapse
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.icons.Symbol
@@ -54,7 +55,7 @@ fun EmptyState(
             top = LocalTopBarInset.current,
             bottom = LocalBottomBarInset.current + LocalTopBarCollapse.current,
             start = 32.dp, end = 32.dp,
-        ),
+        ).padding(start = LocalSideInsets.current.left, end = LocalSideInsets.current.right),
         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

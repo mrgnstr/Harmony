@@ -72,6 +72,7 @@ import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.download.OfflineDownloadManager
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.TabBarSide
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.MissingFileItem
@@ -109,6 +110,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
     val coverBlur: StateFlow<BlurMode> = settings.coverBlur
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
+    val tabBarSide: StateFlow<TabBarSide> = settings.tabBarSide
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TabBarSide.Left)
     val lyricsPriority: StateFlow<LyricsPriority> = settings.lyricsPriority
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LyricsPriority.FilesFirst)
     val sourceMode: StateFlow<LibrarySourceMode> = settings.librarySourceMode
@@ -155,6 +158,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) { viewModelScope.launch { settings.setThemeMode(mode) } }
     fun setGlassBlur(mode: BlurMode) { viewModelScope.launch { settings.setGlassBlur(mode) } }
     fun setCoverBlur(mode: BlurMode) { viewModelScope.launch { settings.setCoverBlur(mode) } }
+    fun setTabBarSide(side: TabBarSide) { viewModelScope.launch { settings.setTabBarSide(side) } }
     fun setLyricsPriority(priority: LyricsPriority) { viewModelScope.launch { settings.setLyricsPriority(priority) } }
     fun setSourceMode(mode: LibrarySourceMode) { viewModelScope.launch { settings.setLibrarySourceMode(mode) } }
     fun setWifiQuality(quality: StreamQuality) { viewModelScope.launch { settings.setWifiStreamQuality(quality) } }
@@ -187,6 +191,7 @@ fun SettingsRoute(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val glassBlur by viewModel.glassBlur.collectAsStateWithLifecycle()
     val coverBlur by viewModel.coverBlur.collectAsStateWithLifecycle()
+    val tabBarSide by viewModel.tabBarSide.collectAsStateWithLifecycle()
     val lyricsPriority by viewModel.lyricsPriority.collectAsStateWithLifecycle()
     val sourceMode by viewModel.sourceMode.collectAsStateWithLifecycle()
     val wifiQuality by viewModel.wifiQuality.collectAsStateWithLifecycle()
@@ -611,6 +616,17 @@ fun SettingsRoute(
                         optionLabel = { it.name },
                         onSelect = viewModel::setCoverBlur,
                     )
+                    // Only tablets choose; phones' bar is locked to their bottom edge.
+                    if (com.mrgnstr.harmony.core.designsystem.LocalWindowLayout.current.isTablet) {
+                        DropdownSettingRow(
+                            title = "Tab Bar Position",
+                            subtitle = tabBarSide.label,
+                            options = TabBarSide.entries,
+                            selected = tabBarSide,
+                            optionLabel = { it.label },
+                            onSelect = viewModel::setTabBarSide,
+                        )
+                    }
                     if (onOpenGallery != null) {
                         MediaRow(
                             title = "Design gallery",

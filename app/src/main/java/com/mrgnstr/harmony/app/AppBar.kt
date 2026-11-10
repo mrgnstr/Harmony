@@ -7,7 +7,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +57,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mrgnstr.harmony.core.common.rememberTickHaptics
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
@@ -71,10 +75,25 @@ import kotlinx.coroutines.launch
 
 /** Height of the floating tab bar and the search button. */
 val AppBarHeight = 64.dp
+/**
+ * The side (vertical) bar is [AppBarHeight] wide; each of its two tabs is at most this long. [sideBarSlotLength] shortens them where
+ * the window is too short for the whole bar.
+ */
+val SideBarMaxSlotLength = 120.dp
+
+/**
+ * The tab length when [free] is the height the bar may use: [SideBarMaxSlotLength] if the whole bar (Search, gap, two tabs) fits in it,
+ * otherwise scaled down to what does (never below a usable minimum).
+ */
+fun sideBarSlotLength(free: Dp): Dp = ((free - AppBarHeight - BarGap) / 2).coerceIn(MinSlotLength, SideBarMaxSlotLength)
+
+private val MinSlotLength = 44.dp
 /** Space between the bar and the navigation bar / screen edge. */
 val AppBarEdgeGap = 12.dp
 internal val BarGap = 10.dp
 private val IndicatorInset = 6.dp
+/** The least a finger travels to pull the indicator out into Search (the vertical bar is short; see [BarGeometry]). */
+private val MinPull = 100.dp
 
 private val AllTabs = listOf(Tab.Home, Tab.Library, Tab.Search)
 private const val SearchIndex = 2
@@ -98,8 +117,12 @@ private fun Tab.symbol(): Symbol = when (this) {
     Tab.Search -> Symbols.Search
 }
 
-/** Where the three slots sit along the bar, in px. The indicator is one x (its centre) that runs through all of them. */
-internal class BarGeometry(val pill: Float, val button: Float, val gap: Float, val inset: Float) {
+/**
+ * Where the three slots sit along the bar's axis, in px, counted from the axis's start: the left edge of the horizontal bar, the
+ * bottom edge of the vertical one (Home at the start, Search at the end). The indicator is one number (its centre) running through all
+ * of them, so everything below is the same in both directions.
+ */
+internal class BarGeometry(val pill: Float, val button: Float, val gap: Float, val inset: Float, minPull: Float = 0f) {
     val item = pill / 2
     /** Search's slot is just outside the pill's edge: the indicator slides out of view there and is never drawn in the button. */
     val centers = floatArrayOf(item / 2, item * 1.5f, pill + (item - 2 * inset) / 2)
@@ -121,6 +144,13 @@ internal class BarGeometry(val pill: Float, val button: Float, val gap: Float, v
 
     val span get() = centers[2] - centers[1]
 
+    /**
+     * How far the finger travels (px) for the indicator to cover [span]: at least [minPull], so a short bar (the vertical one) still has
+     * a long pull and a visible stretch before Search is chosen. The indicator itself only ever moves within [span].
+     */
+    private val k = maxOf(1f, minPull / span)
+    val pull get() = span * k
+
     /** Where the indicator is drawn for a finger-side position [raw] while Search is not chosen: on the nearest of Home / Library (leaning to the finger), a rubber band past Home, a stretch into the edge past Library. */
     fun drawn(raw: Float): Float {
         val c = centers
@@ -136,13 +166,13 @@ internal class BarGeometry(val pill: Float, val button: Float, val gap: Float, v
 
     private val reach get() = StretchReach * span
     /** Slope 1 at first, flattening towards [reach]. */
-    private fun stretch(d: Float) = reach * kotlin.math.tanh(d / reach)
+    private fun stretch(d: Float) = reach * kotlin.math.tanh(d / (reach * k))
     /** How fast the indicator follows the finger at finger distance [d] past Library. */
-    fun slopeAt(d: Float) = 1f - kotlin.math.tanh(d / reach).let { it * it }
+    fun slopeAt(d: Float) = (1f - kotlin.math.tanh(d / (reach * k)).let { it * it }) / k
 
     /** The finger-side position matching a resting or sliding indicator at [x], so a drag starts from where it is. */
     fun rawOf(x: Float): Float =
-        if (x > centers[1]) centers[1] + reach * kotlin.math.atanh(((x - centers[1]) / reach).coerceAtMost(0.999f)) else x
+        if (x > centers[1]) centers[1] + reach * k * kotlin.math.atanh(((x - centers[1]) / reach).coerceAtMost(0.999f)) else x
 }
 
 /**
@@ -169,6 +199,13 @@ fun AppBar(
     onSearchAgain: () -> Unit = {},
     /** How far Now Playing is open (0..1). Minimized, the bar's two buttons slide out to the sides with it instead of the bar sliding down. */
     sideSlide: () -> Float = { 0f },
+    /**
+     * Wide layouts (see `WindowLayout.sideChrome`): the bar stands on a side of the screen, Search on top, Library in the middle, Home at
+     * the bottom, with the same indicator running up and down. It does not minimize there (the caller passes no minimize / fold).
+     */
+    vertical: Boolean = false,
+    /** The side bar's tab length (see [sideBarSlotLength]); only read when [vertical]. */
+    slotLength: Dp = SideBarMaxSlotLength,
 ) {
     val selectedIndex = AllTabs.indexOf(current)
     val density = LocalDensity.current
@@ -193,16 +230,18 @@ fun AppBar(
     Box(modifier, contentAlignment = Alignment.Center) {
     BoxWithConstraints(
         // Measured after the padding and width limits: it is the bar's own left edge the buttons' travel is counted from.
-        Modifier.padding(horizontal = FloatingChromeMargin).widthIn(max = FloatingChromeWidth).fillMaxWidth().height(AppBarHeight)
+        (if (vertical) Modifier.size(AppBarHeight, AppBarHeight + BarGap + slotLength * 2)
+        else Modifier.padding(horizontal = FloatingChromeMargin).widthIn(max = FloatingChromeWidth).fillMaxWidth().height(AppBarHeight))
             .onGloballyPositioned { barLeft = it.positionInRoot().x },
     ) {
-        val geo = remember(maxWidth, density) {
+        val geo = remember(maxWidth, density, vertical, slotLength) {
             with(density) {
                 BarGeometry(
-                    pill = (maxWidth - BarGap - AppBarHeight).toPx(),
+                    pill = if (vertical) (slotLength * 2).toPx() else (maxWidth - BarGap - AppBarHeight).toPx(),
                     button = AppBarHeight.toPx(),
                     gap = BarGap.toPx(),
                     inset = IndicatorInset.toPx(),
+                    minPull = MinPull.toPx(),
                 )
             }
         }
@@ -227,7 +266,7 @@ fun AppBar(
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(geo) {
+                .pointerInput(geo, vertical) {
                     val tracker = VelocityTracker()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -235,7 +274,9 @@ fun AppBar(
                         if (minimizeNow() > 0.02f || foldNow() > 0.02f) return@awaitEachGesture
                         // Holding the bar lifts the indicator where it is; only a drag moves it.
                         scope.launch { lift.animateTo(LiftScale, Springs.press(0.001f)) }
-                        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
+                        val slop =
+                            if (vertical) awaitVerticalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
+                            else awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
                         if (slop == null) {
                             scope.launch { lift.animateTo(1f, Springs.release(0.001f)) }
                             return@awaitEachGesture
@@ -245,15 +286,16 @@ fun AppBar(
                         tracker.addPosition(slop.uptimeMillis, slop.position)
                         // Starting from Search the indicator is out of sight: the finger sits at the point where it was chosen.
                         var chosen = selected == SearchIndex
-                        var raw = if (chosen) geo.centers[1] + ChooseAt * geo.span else geo.rawOf(pos.value)
+                        var raw = if (chosen) geo.centers[1] + ChooseAt * geo.pull else geo.rawOf(pos.value)
                         var catchingUp = false
                         var lastNear = if (chosen) SearchIndex else geo.nearest(pos.value)
                         dragNear = lastNear
-                        val finished = horizontalDrag(slop.id) { change ->
-                            raw += change.positionChange().x
+                        // Along the axis: to the right, or up (the vertical bar counts from its bottom).
+                        val onDrag: (PointerInputChange) -> Unit = { change ->
+                            raw += change.positionChange().let { if (vertical) -it.y else it.x }
                             change.consume()
                             tracker.addPosition(change.uptimeMillis, change.position)
-                            val d = (raw - geo.centers[1]) / geo.span
+                            val d = (raw - geo.centers[1]) / geo.pull
                             if (!chosen && d >= ChooseAt) {
                                 chosen = true
                                 scope.launch { pos.animateTo(geo.centers[SearchIndex], slide) }
@@ -274,11 +316,12 @@ fun AppBar(
                             val near = if (chosen) SearchIndex else geo.nearest(geo.drawn(raw)).coerceAtMost(1)
                             if (near != lastNear) { lastNear = near; dragNear = near; haptics.tick() }
                         }
-                        val v = tracker.calculateVelocity().x
+                        val finished = if (vertical) verticalDrag(slop.id, onDrag) else horizontalDrag(slop.id, onDrag)
+                        val v = tracker.calculateVelocity().let { if (vertical) -it.y else it.x }
                         val ahead = raw + v * 0.12f
                         val target = when {
                             !finished -> selected
-                            ahead > geo.centers[1] -> if ((ahead - geo.centers[1]) / geo.span >= (ChooseAt + LetGoAt) / 2) SearchIndex else 1
+                            ahead > geo.centers[1] -> if ((ahead - geo.centers[1]) / geo.pull >= (ChooseAt + LetGoAt) / 2) SearchIndex else 1
                             else -> geo.nearest(geo.drawn(ahead)).coerceAtMost(1)
                         }
                         dragging = false
@@ -291,7 +334,31 @@ fun AppBar(
                     }
                 },
         ) {
-            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            if (vertical) {
+                // Search on top, then the pill with Library above Home: the order of the horizontal bar, read from the bottom up.
+                Column(Modifier.fillMaxSize()) {
+                    SearchButton(
+                        selected = current == Tab.Search,
+                        fill = { fill.value },
+                        pop = { pop.value },
+                        fillColor = indicatorColor,
+                        onClick = { if (current == Tab.Search) searchAgain() else select(Tab.Search) },
+                        blur = blur,
+                    )
+                    Spacer(Modifier.height(BarGap))
+                    TabPill(
+                        blur = blur,
+                        indicator = Modifier.indicator(pos, lift, geo, indicatorColor, vertical = true) { 1f },
+                        selected = current,
+                        weight = weight,
+                        onSelect = { select(it) },
+                        geo = geo,
+                        collapse = 0f,
+                        vertical = true,
+                        modifier = Modifier.size(AppBarHeight, slotLength * 2),
+                    )
+                }
+            } else Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 val m = minimize()
                 val f = fold()
                 TabPill(
@@ -338,12 +405,19 @@ private fun Modifier.indicator(
     lift: Animatable<Float, AnimationVector1D>,
     geo: BarGeometry,
     color: Color,
+    vertical: Boolean = false,
     alpha: () -> Float,
 ) = drawBehind {
     val scale = geo.scaleAt(x.value) * lift.value
-    val w = (geo.item - 2 * geo.inset) * scale
-    val h = (size.height - 2 * geo.inset) * scale
-    drawRoundRect(color.copy(alpha = color.alpha * alpha()), Offset(x.value - w / 2, (size.height - h) / 2), Size(w, h), CornerRadius(h / 2))
+    val along = (geo.item - 2 * geo.inset) * scale
+    val across = ((if (vertical) size.width else size.height) - 2 * geo.inset) * scale
+    val tint = color.copy(alpha = color.alpha * alpha())
+    if (vertical) {
+        // The axis runs up from the pill's bottom edge.
+        drawRoundRect(tint, Offset((size.width - across) / 2, size.height - x.value - along / 2), Size(across, along), CornerRadius(across / 2))
+    } else {
+        drawRoundRect(tint, Offset(x.value - along / 2, (size.height - across) / 2), Size(along, across), CornerRadius(across / 2))
+    }
 }
 
 @Composable
@@ -356,9 +430,30 @@ private fun TabPill(
     geo: BarGeometry,
     collapse: Float,
     modifier: Modifier,
+    vertical: Boolean = false,
+    iconSize: Dp = 24.dp,
 ) {
     val density = LocalDensity.current
-    ChromeSurface(blur, CircleShape, modifier.height(AppBarHeight)) {
+    ChromeSurface(blur, CircleShape, if (vertical) modifier else modifier.height(AppBarHeight)) {
+        if (vertical) {
+            Box(Modifier.fillMaxSize().then(indicator)) {
+                Column(Modifier.fillMaxSize()) {
+                    // Library above Home: the axis counts from the bottom.
+                    AllTabs.take(SearchIndex).reversed().forEach { tab ->
+                        TabItem(
+                            tab = tab,
+                            selectedness = { weight(AllTabs.indexOf(tab)) },
+                            selected = tab == selected,
+                            onClick = { onSelect(tab) },
+                            labelAlpha = 1f,
+                            iconSize = iconSize,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+            return@ChromeSurface
+        }
         Box(Modifier.fillMaxSize().then(indicator), contentAlignment = Alignment.CenterStart) {
             // The row keeps its full width while the pill shrinks around it: the selected tab slides to the middle of what is left
             // (and drops into the space its label leaves), the others fade, and the pill's clip hides the rest.
@@ -389,7 +484,9 @@ private fun TabPill(
 }
 
 @Composable
-private fun TabItem(tab: Tab, selectedness: () -> Float, selected: Boolean, onClick: () -> Unit, labelAlpha: Float, modifier: Modifier) {
+private fun TabItem(
+    tab: Tab, selectedness: () -> Float, selected: Boolean, onClick: () -> Unit, labelAlpha: Float, modifier: Modifier, iconSize: Dp = 24.dp,
+) {
     val interaction = remember { MutableInteractionSource() }
     val active = MaterialTheme.colorScheme.onSecondaryContainer
     val idle = MaterialTheme.colorScheme.onSurfaceVariant
@@ -403,8 +500,8 @@ private fun TabItem(tab: Tab, selectedness: () -> Float, selected: Boolean, onCl
     ) {
         // Colours follow the indicator as it passes, not the selection, so a drag recolours the item under the finger.
         val tint = androidx.compose.ui.graphics.lerp(idle, active, selectedness())
-        AnimatedSymbolIcon(tab.symbol(), null, filled = selected, tint = tint)
-        Text(tab.label, style = MaterialTheme.typography.labelMedium, color = tint, modifier = Modifier.graphicsLayer { alpha = labelAlpha })
+        AnimatedSymbolIcon(tab.symbol(), null, filled = selected, tint = tint, size = iconSize)
+        Text(tab.label, style = if (iconSize > 28.dp) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium, color = tint, modifier = Modifier.graphicsLayer { alpha = labelAlpha })
     }
 }
 
@@ -417,6 +514,7 @@ private fun SearchButton(
     onClick: () -> Unit,
     blur: ChromeBlurState?,
     modifier: Modifier = Modifier,
+    diameter: Dp = AppBarHeight,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val tint = androidx.compose.ui.graphics.lerp(
@@ -428,7 +526,7 @@ private fun SearchButton(
         blur,
         CircleShape,
         modifier
-            .size(AppBarHeight)
+            .size(diameter)
             .graphicsLayer { pop().let { scaleX = it; scaleY = it } }
             .pressResponse(interaction, pressedScale = 0.86f)
             .semantics { role = Role.Tab; this.selected = selected },
@@ -443,7 +541,7 @@ private fun SearchButton(
                 .clickable(interaction, indication = null, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            AnimatedSymbolIcon(Symbols.Search, Tab.Search.label, filled = selected, tint = tint, size = 28.dp, weight = if (selected) 600 else 400)
+            AnimatedSymbolIcon(Symbols.Search, Tab.Search.label, filled = selected, tint = tint, size = 28.dp + (diameter - AppBarHeight).coerceAtLeast(0.dp) * 0.25f, weight = if (selected) 600 else 400)
         }
     }
 }

@@ -158,7 +158,13 @@ private class ScreenCorners(val tl: Float, val tr: Float, val br: Float, val bl:
  * [progress] is how far it has moved down; [drop] is how far down that is, [left] / [right] the room the two buttons take. On the
  * Search tab the bar's pill folds away ([fold] 1) and the mini player takes the whole left side, so [left] is not reserved.
  */
-class MiniDock(val progress: () -> Float, val drop: Dp, val left: Dp, val right: Dp, val fold: () -> Float = { 0f })
+class MiniDock(
+    val progress: () -> Float, val drop: Dp, val left: Dp, val right: Dp, val fold: () -> Float = { 0f },
+    /** Whether the pill is narrowed to the inline size (the next button goes); false in a wide layout, where it stays wide. */
+    val compact: Boolean = true,
+    /** The widest the pill gets, centred in what the bar leaves free (the wide layouts keep it the size it has upright). */
+    val maxWidth: Dp = Dp.Infinity,
+)
 
 /** The pill's shape at any size: fully round at [miniH] tall, the display's own corners at [screenH] tall (the height is linear in progress). */
 private class MorphingPillShape(private val miniH: Float, private val screenH: Float, private val corners: ScreenCorners) : Shape {
@@ -243,8 +249,11 @@ fun PlayerSheet(
         val docked = dock?.progress?.invoke() ?: 0f
         val dockLeft = dock?.let { with(density) { it.left.toPx() } * (1f - it.fold()) } ?: 0f
         val dockRight = dock?.let { with(density) { it.right.toPx() } } ?: 0f
-        val miniW = fullW - (dockLeft + dockRight) * docked
-        val margin = fullMargin + dockLeft * docked
+        // How much of the next button is gone (only in the narrow inline size).
+        val nextGone = if (dock?.compact == false) 0f else docked
+        val availableW = fullW - (dockLeft + dockRight) * docked
+        val miniW = minOf(availableW, dock?.let { with(density) { it.maxWidth.toPx() } } ?: Float.POSITIVE_INFINITY)
+        val margin = fullMargin + dockLeft * docked + (availableW - miniW) / 2f
         val restingTop = screenH - with(density) { restingBottom.toPx() } + (dock?.let { with(density) { it.drop.toPx() } } ?: 0f) * docked - miniH
         val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
         val navBottom = WindowInsets.navigationBars.getBottom(density).toFloat()
@@ -431,9 +440,9 @@ fun PlayerSheet(
                     )
                     val nextKick = rememberSkipKick(next = true, reach = 6.dp)
                     // Beside the minimized bar there is no room for it (as in Music): it fades and gives its width back.
-                    Box(Modifier.width(48.dp * (1f - docked)).clipToBounds().graphicsLayer { alpha = 1f - docked }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(48.dp * (1f - nextGone)).clipToBounds().graphicsLayer { alpha = 1f - nextGone }, contentAlignment = Alignment.Center) {
                         androidx.compose.material3.IconButton(
-                            onClick = { nextKick.kick(); viewModel.next() }, enabled = snap.hasNext && docked < 0.5f,
+                            onClick = { nextKick.kick(); viewModel.next() }, enabled = snap.hasNext && nextGone < 0.5f,
                             modifier = Modifier.requiredWidth(48.dp),
                         ) {
                             SkipIcon(Symbols.SkipNext, "Next", nextKick)
@@ -620,7 +629,7 @@ fun PlayerSheet(
                                 headerY + headerSize / 2f - miniH / 2f,
                             ),
                             miniTextWidth = {
-                                miniW - with(density) { (MiniArtInset + MiniArt + 12.dp + 8.dp + 48.dp + 48.dp * (1f - docked)).toPx() }
+                                miniW - with(density) { (MiniArtInset + MiniArt + 12.dp + 8.dp + 48.dp + 48.dp * (1f - nextGone)).toPx() }
                             },
                             miniTitleSize = MaterialTheme.typography.titleMediumEmphasized.fontSize,
                             miniArtistSize = MaterialTheme.typography.bodySmall.fontSize,

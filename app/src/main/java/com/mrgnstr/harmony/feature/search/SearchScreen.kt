@@ -100,6 +100,7 @@ import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
+import com.mrgnstr.harmony.core.designsystem.components.ColumnsShelf
 import com.mrgnstr.harmony.core.designsystem.components.AlbumContextMenu
 import com.mrgnstr.harmony.core.designsystem.components.LocalOfflineDim
 import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
@@ -548,8 +549,8 @@ fun SearchRoute(
                                             onMore = if (scope == SearchScope.All && results.songs.size > PreviewLimit) ({ scope = SearchScope.Songs }) else null,
                                         )
                                     }
-                                    val songs = if (scope == SearchScope.All) results.songs.take(PreviewLimit) else results.songs
-                                    itemsIndexed(songs, key = { _, s -> "song:${s.id}" }, contentType = { _, _ -> "song" }) { index, song ->
+                                    // All results, in columns of five scrolling sideways; one category at a time is the full vertical list.
+                                    val songRow: @Composable (Song, Int, Modifier) -> Unit = { song, index, rowModifier ->
                                         val subtitle = remember(song.artist, song.album) {
                                             listOfNotNull(song.artist.takeIf { it.isNotBlank() }, song.album.takeIf { it.isNotBlank() }).joinToString(" · ")
                                         }
@@ -558,8 +559,17 @@ fun SearchRoute(
                                             onClick = { focus.clearFocus(); viewModel.playSong(index) },
                                             subtitle = subtitle,
                                             playing = song.id == playingId,
-                                            modifier = itemMotion(),
+                                            modifier = rowModifier,
                                         )
+                                    }
+                                    if (scope == SearchScope.All) {
+                                        item(key = "songs-shelf", contentType = "shelf") {
+                                            ColumnsShelf(results.songs, key = { "song:${it.id}" }) { song, index -> songRow(song, index, Modifier) }
+                                        }
+                                    } else {
+                                        itemsIndexed(results.songs, key = { _, s -> "song:${s.id}" }, contentType = { _, _ -> "song" }) { index, song ->
+                                            songRow(song, index, itemMotion())
+                                        }
                                     }
                                 }
                                 SearchCategory.Albums -> if (results.albums.isNotEmpty()) {
@@ -569,13 +579,16 @@ fun SearchRoute(
                                             onMore = if (scope == SearchScope.All && results.albums.size > PreviewLimit) ({ scope = SearchScope.Albums }) else null,
                                         )
                                     }
-                                    val albums = if (scope == SearchScope.All) results.albums.take(PreviewLimit) else results.albums
-                                    items(albums, key = { "album:${it.id}:${it.title}" }, contentType = { "album" }) { album ->
-                                        SearchAlbumRow(
-                                            album = album,
-                                            onClick = { openResult(); onOpenAlbum(album) },
-                                            modifier = itemMotion(),
-                                        )
+                                    if (scope == SearchScope.All) {
+                                        item(key = "albums-shelf", contentType = "shelf") {
+                                            ColumnsShelf(results.albums, key = { "album:${it.id}:${it.title}" }) { album, _ ->
+                                                SearchAlbumRow(album = album, onClick = { openResult(); onOpenAlbum(album) }, modifier = Modifier)
+                                            }
+                                        }
+                                    } else {
+                                        items(results.albums, key = { "album:${it.id}:${it.title}" }, contentType = { "album" }) { album ->
+                                            SearchAlbumRow(album = album, onClick = { openResult(); onOpenAlbum(album) }, modifier = itemMotion())
+                                        }
                                     }
                                 }
                                 SearchCategory.Artists -> if (results.artists.isNotEmpty()) {
@@ -585,13 +598,16 @@ fun SearchRoute(
                                             onMore = if (scope == SearchScope.All && results.artists.size > PreviewLimit) ({ scope = SearchScope.Artists }) else null,
                                         )
                                     }
-                                    val artists = if (scope == SearchScope.All) results.artists.take(PreviewLimit) else results.artists
-                                    items(artists, key = { "artist:${it.name}" }, contentType = { "artist" }) { artist ->
-                                        SearchArtistRow(
-                                            artist = artist,
-                                            onClick = { openResult(); onOpenArtist(artist.name) },
-                                            modifier = itemMotion(),
-                                        )
+                                    if (scope == SearchScope.All) {
+                                        item(key = "artists-shelf", contentType = "shelf") {
+                                            ColumnsShelf(results.artists, key = { "artist:${it.name}" }) { artist, _ ->
+                                                SearchArtistRow(artist = artist, onClick = { openResult(); onOpenArtist(artist.name) }, modifier = Modifier)
+                                            }
+                                        }
+                                    } else {
+                                        items(results.artists, key = { "artist:${it.name}" }, contentType = { "artist" }) { artist ->
+                                            SearchArtistRow(artist = artist, onClick = { openResult(); onOpenArtist(artist.name) }, modifier = itemMotion())
+                                        }
                                     }
                                 }
                                 SearchCategory.Playlists -> if (results.playlists.isNotEmpty()) {
@@ -601,15 +617,23 @@ fun SearchRoute(
                                             onMore = if (scope == SearchScope.All && results.playlists.size > PreviewLimit) ({ scope = SearchScope.Playlists }) else null,
                                         )
                                     }
-                                    val playlists = if (scope == SearchScope.All) results.playlists.take(PreviewLimit) else results.playlists
-                                    items(playlists, key = { "playlist:${it.id}" }, contentType = { "playlist" }) { playlist ->
+                                    val playlistRow: @Composable (Playlist, Modifier) -> Unit = { playlist, rowModifier ->
                                         SearchPlaylistRow(
                                             playlist = playlist,
                                             onClick = { openResult(); onOpenPlaylist(playlist.id) },
                                             onPlay = { viewModel.playPlaylist(playlist, shuffled = false) },
                                             onShuffle = { viewModel.playPlaylist(playlist, shuffled = true) },
-                                            modifier = itemMotion(),
+                                            modifier = rowModifier,
                                         )
+                                    }
+                                    if (scope == SearchScope.All) {
+                                        item(key = "playlists-shelf", contentType = "shelf") {
+                                            ColumnsShelf(results.playlists, key = { "playlist:${it.id}" }) { playlist, _ -> playlistRow(playlist, Modifier) }
+                                        }
+                                    } else {
+                                        items(results.playlists, key = { "playlist:${it.id}" }, contentType = { "playlist" }) { playlist ->
+                                            playlistRow(playlist, itemMotion())
+                                        }
                                     }
                                 }
                             }

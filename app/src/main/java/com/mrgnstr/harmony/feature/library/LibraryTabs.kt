@@ -29,6 +29,7 @@ import coil3.compose.AsyncImage
 import com.mrgnstr.harmony.core.designsystem.ArtistPicture
 import com.mrgnstr.harmony.core.designsystem.ArtworkImage
 import com.mrgnstr.harmony.core.designsystem.LocalBottomBarInset
+import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
 import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
@@ -51,7 +52,7 @@ import java.io.File
 
 /** Room under the list for the floating tab bar and the mini player. */
 @Composable
-internal fun listPadding() = PaddingValues(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
+internal fun listPadding() = LocalSideInsets.current.padding(top = LocalTopBarInset.current + 16.dp, bottom = LocalBottomBarInset.current + 16.dp)
 
 
 /** An empty tab: a spinner while the first scan is still running, otherwise [title] and [message]. */
