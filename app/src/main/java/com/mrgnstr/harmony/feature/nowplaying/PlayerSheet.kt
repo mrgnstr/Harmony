@@ -410,25 +410,33 @@ fun PlayerSheet(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() }.background(Color.Black),
             )
 
-            // The cover: the mini player's thumbnail grows into the full-width picture.
+            // Where the cover is: the mini player's thumbnail grows into the full-width picture, or, in a panel, goes to the header.
+            // Two covers share this, the one here and the panel's (composed with the full player, further up), and take over from
+            // each other when that is composed (a hair into the opening), so they must be in the same place at every moment.
+            val placeCover: GraphicsLayerScope.() -> Unit = {
+                val p = clamped()
+                val q = panel.q()
+                // Between the header and the mini player the cover moves in a straight line.
+                val hp = lerp(miniArt, headerSize, p)
+                val s = lerp(lerp(miniArt / fullArt, 1f, p), hp / fullArt, q)
+                transformOrigin = TransformOrigin(0f, 0f)
+                scaleX = s; scaleY = s
+                translationX = lerp(coverLeft(p), lerp(miniArtX, headerX, p), q)
+                translationY = lerp(coverTop(p), lerp(miniArtY, headerY, p), q) + sag()
+                // The radius is set in the layer's own (unscaled) space, so divide the on-screen one by the scale.
+                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
+                shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
+                clip = true
+            }
             CoverBox(
                 cover,
                 Modifier
                     .wrapContentSize(Alignment.TopStart, unbounded = true)
                     .size(with(density) { fullArt.toDp() }, with(density) { fullArt.toDp() })
                     .graphicsLayer {
-                        val p = clamped()
-                        val s = lerp(miniArt / fullArt, 1f, p)
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        scaleX = s; scaleY = s
-                        translationX = coverLeft(p)
-                        translationY = coverTop(p) + sag()
+                        placeCover()
                         // In a panel the cover is drawn by the one further up (the header's); until that is composed, this one stays.
                         alpha = if (showFull) 1f - panel.open.value else 1f
-                        // The radius is set in the layer's own (unscaled) space, so divide the on-screen one by the scale.
-                        val radius = lerp(MiniArtRadius.toPx(), 0f, p) / s
-                        shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
-                        clip = true
                     },
             )
 
@@ -529,20 +537,7 @@ fun PlayerSheet(
                         Modifier
                             .wrapContentSize(Alignment.TopStart, unbounded = true)
                             .size(with(density) { fullArt.toDp() }, with(density) { fullArt.toDp() })
-                            .graphicsLayer {
-                                val p = clamped()
-                                val q = panel.q()
-                                // Between the header and the mini player the cover moves in a straight line.
-                                val hp = lerp(miniArt, headerSize, p)
-                                val s = lerp(lerp(miniArt / fullArt, 1f, p), hp / fullArt, q)
-                                transformOrigin = TransformOrigin(0f, 0f)
-                                scaleX = s; scaleY = s
-                                translationX = lerp(coverLeft(p), lerp(miniArtX, headerX, p), q)
-                                translationY = lerp(coverTop(p), lerp(miniArtY, headerY, p), q) + sag()
-                                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
-                                shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
-                                clip = true
-                            }
+                            .graphicsLayer { placeCover() }
                             // After the layer, so the touch area is the cover as drawn: it closes the panel.
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = panel.panel != NowPlayingPanel.None) {
                                 scope.launch { panel.toggle(panel.panel) }
