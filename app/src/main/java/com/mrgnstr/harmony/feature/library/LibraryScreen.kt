@@ -21,6 +21,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.util.lerp
@@ -95,8 +96,22 @@ fun LibraryRoute(
     // Where each tab's label is drawn (x in the window, width), and where the indicator's slot starts: the indicator is placed from these.
     val labels = remember { mutableStateListOf<Pair<Float, Int>>().apply { repeat(tabs.size) { add(0f to 0) } } }
     var slotX by remember { mutableFloatStateOf(0f) }
+    // The tab row's natural width (each tab: its label plus 16 dp either side, at least 90 dp; edge padding at both ends), so the bar
+    // can tell whether it fits in the title's row.
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val tabStyle = MaterialTheme.typography.titleSmall
+    val tabsWidth = remember(measurer, density, tabStyle) {
+        with(density) {
+            tabs.sumOf { maxOf(90.dp.toPx(), measurer.measure(it.label, tabStyle).size.width + 32.dp.toPx()).toDouble() }.toFloat().toDp() +
+                TabEdgePadding * 2 + 4.dp
+        }
+    }
     TopBarScaffold(
         title = "Library",
+        tabsWidth = tabsWidth,
+        // The row's blank ends: its edge padding and the 16 dp inside the first / last tab.
+        tabsInset = TabEdgePadding + 16.dp,
         actions = {
             if (hasNavidrome) {
                 Box {

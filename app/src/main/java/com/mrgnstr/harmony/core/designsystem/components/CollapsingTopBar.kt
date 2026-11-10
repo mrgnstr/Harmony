@@ -2,6 +2,11 @@ package com.mrgnstr.harmony.core.designsystem.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -65,7 +70,6 @@ private val SubtitleGap = 4.dp
  * Content is laid out as tall as the bar's collapse and slid up with it, so a list keeps one fixed top padding and is not
  * re-measured while the bar collapses.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopBarScaffold(
     title: String,
@@ -74,10 +78,36 @@ fun TopBarScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     tabs: (@Composable () -> Unit)? = null,
+    /**
+     * The [tabs] row's natural width (all labels, edge padding included). When it fits between the small title and the [actions] it is
+     * placed there, centred, in the title's own row, and the row under the title is not reserved (wide screens).
+     */
+    tabsWidth: Dp? = null,
+    /** The blank space at each end of the [tabs] row (edge padding and a tab's own padding): it may sit under the title or the buttons. */
+    tabsInset: Dp = 0.dp,
     floatingBarHeight: Dp = 0.dp,
     floatingBar: (@Composable (ChromeBlurState) -> Unit)? = null,
     content: @Composable () -> Unit,
+) = BoxWithConstraints(modifier) {
+    TopBarScaffoldImpl(title, subtitle, onBack, actions, tabs, tabsWidth, tabsInset, constraints.maxWidth.toFloat(), floatingBarHeight, floatingBar, content)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopBarScaffoldImpl(
+    title: String,
+    subtitle: String?,
+    onBack: (() -> Unit)?,
+    actions: @Composable RowScope.() -> Unit,
+    tabs: (@Composable () -> Unit)?,
+    tabsWidth: Dp?,
+    tabsInset: Dp,
+    widthPx: Float,
+    floatingBarHeight: Dp,
+    floatingBar: (@Composable (ChromeBlurState) -> Unit)?,
+    content: @Composable () -> Unit,
 ) {
+    val modifier = Modifier
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val density = LocalDensity.current
     val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
@@ -88,12 +118,30 @@ fun TopBarScaffold(
     val titleExtraPx = maxOf(with(density) { TitleExtra.toPx() }, titleHeight + with(density) { TitleBottomGap.toPx() })
     val subtitleRoom = if (subtitle != null) maxOf(with(density) { SubtitleExtra.toPx() }, subtitleHeight + with(density) { SubtitleGap.toPx() }) else 0f
     val extraPx = titleExtraPx + subtitleRoom
-    val tabsPx = if (tabs != null) with(density) { TabsHeight.toPx() } else 0f
+    // Do the tabs fit in the title's row, between the small title and the buttons? (Measured text; the buttons' width is read back once laid out.)
+    val textMeasurer = rememberTextMeasurer()
+    val smallTitlePx = textMeasurer.measure(title, MaterialTheme.typography.titleLarge, maxLines = 1).size.width
+    var actionsPx by remember { mutableFloatStateOf(with(density) { 148.dp.toPx() }) }
+    val leftEdge = with(density) { (if (onBack != null) TitleStartWithBack else TitleStart).toPx() + smallTitlePx + 12.dp.toPx() }
+    val rightEdge = widthPx - actionsPx - with(density) { 4.dp.toPx() }
+    val tabsWidthPx = tabsWidth?.let { with(density) { it.toPx() } } ?: 0f
+    // Only the labels have to fit between the title and the buttons: the row's blank ends may overlap them.
+    val insetPx = with(density) { tabsInset.toPx() }
+    val inlineTabs = tabs != null && tabsWidth != null && tabsWidthPx - 2 * insetPx <= rightEdge - leftEdge
+    // Inline, the tabs ride on the title's line (below), so the bar keeps a little room under it for the tabs' underline and the usual gap.
+    val tabsPx = when {
+        tabs == null -> 0f
+        inlineTabs -> with(density) { InlineTabsBottomPad.toPx() }
+        else -> with(density) { TabsHeight.toPx() }
+    }
+    val largeTitlePx = textMeasurer.measure(title, MaterialTheme.typography.headlineLarge, maxLines = 1).size.width
     val floatingPx = if (floatingBar != null) with(density) { floatingBarHeight.toPx() } else 0f
     // Collapsing is the scroll behaviour's offset (0 expanded .. -distance collapsed); the layers below only read it when drawing or placing.
     val distance = extraPx
     LaunchedEffect(distance) { scroll.state.heightOffsetLimit = -distance }
     val collapsed: () -> Float = { (-scroll.state.heightOffset / distance).coerceIn(0f, 1f) }
+    // The room under the tabs row stays; the room kept under the title for inline tabs goes as the bar collapses (a collapsed bar is as tall as any other).
+    val tabsRoom: () -> Float = { if (inlineTabs) tabsPx * (1f - collapsed()) else tabsPx }
     val pageBlur = rememberChromeBlurState()
     val largeStyle = MaterialTheme.typography.headlineLarge
     val titleScale = MaterialTheme.typography.titleLarge.fontSize.value / largeStyle.fontSize.value
@@ -119,7 +167,7 @@ fun TopBarScaffold(
         ChromeSurface(
             pageBlur, RectangleShape,
             Modifier.fillMaxWidth().layout { measurable, c ->
-                val h = (statusTop + rowPx + extraPx + tabsPx + scroll.state.heightOffset.coerceIn(-distance, 0f)).roundToInt()
+                val h = (statusTop + rowPx + extraPx + tabsRoom() + scroll.state.heightOffset.coerceIn(-distance, 0f)).roundToInt()
                 val placeable = measurable.measure(Constraints.fixed(c.maxWidth, h))
                 layout(c.maxWidth, h) { placeable.place(0, 0) }
             },
@@ -179,11 +227,37 @@ fun TopBarScaffold(
                         }
                     }
                     Row(
-                        Modifier.align(Alignment.TopEnd).padding(top = with(density) { statusTop.toDp() }, end = 4.dp).height(BarRow),
+                        Modifier.align(Alignment.TopEnd).padding(top = with(density) { statusTop.toDp() }, end = 4.dp).height(BarRow)
+                            .onSizeChanged { actionsPx = it.width.toFloat() },
                         verticalAlignment = Alignment.CenterVertically,
                         content = actions,
                     )
-                    if (tabs != null) Box(Modifier.align(Alignment.BottomStart)) { tabs() }
+                    if (tabs != null) {
+                        if (inlineTabs) {
+                            // They travel with the title: on its line while it is large, up into the title row as it shrinks (between it and the buttons).
+                            Box(
+                                Modifier
+                                    .offset {
+                                        val f = collapsed()
+                                        val compactStart = (if (onBack != null) TitleStartWithBack else TitleStart).toPx()
+                                        // The title's right edge: its start plus its width at the current scale.
+                                        val left = lerp(TitleStart.toPx(), compactStart, f) + largeTitlePx * lerp(1f, titleScale, f) + 12.dp.toPx()
+                                        val right = lerp(widthPx - 16.dp.toPx(), rightEdge, f)
+                                        val expandedCentre = statusTop + rowPx + extraPx - subtitleRoom - titleHeight - TitleBottomGap.toPx() + titleHeight / 2f
+                                        val centre = lerp(expandedCentre, statusTop + rowPx / 2f, f)
+                                        IntOffset(
+                                            // Centred on the screen; only pushed aside as far as the title (or the buttons) force it.
+                                            ((widthPx - tabsWidthPx) / 2f).coerceIn(left - insetPx, maxOf(left - insetPx, right + insetPx - tabsWidthPx)).roundToInt(),
+                                            (centre - TabsHeight.toPx() / 2f).roundToInt(),
+                                        )
+                                    }
+                                    .size(tabsWidth!!, TabsHeight),
+                                contentAlignment = Alignment.Center,
+                            ) { tabs() }
+                        } else {
+                            Box(Modifier.align(Alignment.BottomStart)) { tabs() }
+                        }
+                    }
                 }
             }
         }
@@ -192,7 +266,7 @@ fun TopBarScaffold(
             CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
                 Box(
                     Modifier.fillMaxWidth().layout { measurable, c ->
-                        val barH = (statusTop + rowPx + extraPx + tabsPx + scroll.state.heightOffset.coerceIn(-distance, 0f)).roundToInt()
+                        val barH = (statusTop + rowPx + extraPx + tabsRoom() + scroll.state.heightOffset.coerceIn(-distance, 0f)).roundToInt()
                         val h = floatingPx.roundToInt()
                         val placeable = measurable.measure(Constraints.fixed(c.maxWidth, h))
                         layout(c.maxWidth, barH + h) { placeable.place(0, barH) }
@@ -207,3 +281,6 @@ fun TopBarScaffold(
 
 /** The height of a text-only tab row, which [TopBarScaffold] reserves under the title when it has tabs. */
 val TabsHeight = 48.dp
+
+/** Room kept under the title when the tabs sit on its line instead of in a row of their own. */
+private val InlineTabsBottomPad = 24.dp
