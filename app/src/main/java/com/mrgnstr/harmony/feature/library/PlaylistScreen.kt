@@ -107,6 +107,9 @@ fun PlaylistRoute(
     var deleting by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     val canEdit = playlist != null && !playlist.isFavourites && playlist.editable
+    // Only server tracks can be downloaded; "fully downloaded" means every one of them is, then the menu offers removal.
+    val remoteSongs = state.entries.map { it.song }.filter { it.isRemote }
+    val allDownloaded = remoteSongs.isNotEmpty() && remoteSongs.all { it.isDownloaded }
 
     val listState = rememberLazyListState()
     val settled = rememberTransitionSettled()
@@ -172,6 +175,13 @@ fun PlaylistRoute(
                         DropdownMenuItem(
                             text = { Text("Add to queue") }, leadingIcon = { SymbolIcon(Symbols.QueueMusic, null) },
                             onClick = { close(); viewModel.addAllToQueue() },
+                        )
+                    }
+                    if (remoteSongs.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(if (allDownloaded) "Remove downloads" else "Download playlist") },
+                            leadingIcon = { SymbolIcon(if (allDownloaded) Symbols.OfflinePin else Symbols.Download, null, fill = if (allDownloaded) 1f else 0f) },
+                            onClick = { close(); if (allDownloaded) viewModel.removeAllDownloads() else viewModel.downloadAll() },
                         )
                     }
                     if (canEdit) {

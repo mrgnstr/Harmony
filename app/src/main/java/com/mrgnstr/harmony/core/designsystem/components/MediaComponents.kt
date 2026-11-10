@@ -81,6 +81,7 @@ fun ArtworkTile(
     modifier: Modifier = Modifier,
     circular: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    dimmed: Boolean = false,
     menu: @Composable () -> Unit = {},
     artwork: @Composable (Modifier) -> Unit,
 ) {
@@ -89,6 +90,7 @@ fun ArtworkTile(
     Box(modifier) {
         Column(
             Modifier
+                .offlineDim(dimmed)
                 .pressResponse(interaction, pressedScale = 0.95f)
                 .combinedClickable(
                     interactionSource = interaction,
@@ -147,6 +149,7 @@ fun AlbumTile(
         onClick = { share?.claim(key, owner); onClick() },
         modifier = modifier,
         onLongClick = { menuInitialized = true; menuOpen = true },
+        dimmed = LocalOfflineDim.current.album(album),
         menu = {
             if (menuInitialized) {
                 AlbumContextMenu(
@@ -193,6 +196,7 @@ fun SongRow(
         modifier = modifier,
         titleColor = if (playing) MaterialTheme.colorScheme.primary else Color.Unspecified,
         onLongClick = openMenu,
+        dimmed = LocalOfflineDim.current.song(song),
         leading = leading,
         trailing = {
             IconButton(onClick = openMenu) {
@@ -223,6 +227,7 @@ fun MediaRow(
     modifier: Modifier = Modifier,
     titleColor: Color = Color.Unspecified,
     onLongClick: (() -> Unit)? = null,
+    dimmed: Boolean = false,
     leading: (@Composable () -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
     menu: @Composable () -> Unit = {},
@@ -233,6 +238,7 @@ fun MediaRow(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 64.dp)
+                .offlineDim(dimmed)
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = if (onLongClick != null) {

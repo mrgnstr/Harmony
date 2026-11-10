@@ -220,6 +220,17 @@ class AlbumViewModel @AssistedInject constructor(
 
     fun downloadAlbum() { downloads.downloadSongs(state.value.songs) }
 
+    fun removeAlbumDownloads() {
+        val songs = state.value.songs.filter { it.isDownloaded }
+        viewModelScope.launch { songs.forEach { downloads.removeDownload(it) } }
+    }
+
+    fun downloadSong(song: Song) = downloads.downloadSong(song)
+
+    fun removeSongDownload(song: Song) {
+        viewModelScope.launch { downloads.removeDownload(song) }
+    }
+
     suspend fun createShare(description: String, downloadable: Boolean): ShareLink? =
         navidrome.createShareForAlbum(albumId, description, downloadable = downloadable)
 

@@ -69,6 +69,8 @@ import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.components.AddToPlaylistSheet
 import com.mrgnstr.harmony.core.designsystem.components.AlbumTile
 import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
+import com.mrgnstr.harmony.core.designsystem.components.LocalOfflineDim
+import com.mrgnstr.harmony.core.designsystem.components.offlineDim
 import com.mrgnstr.harmony.core.designsystem.components.NavidromeShareSheet
 import com.mrgnstr.harmony.core.designsystem.components.albumCoverKey
 import com.mrgnstr.harmony.core.designsystem.components.sharedCover
@@ -121,6 +123,8 @@ fun AlbumRoute(
     val queue by viewModel.downloadQueue.collectAsStateWithLifecycle()
     val failed by viewModel.downloadFailed.collectAsStateWithLifecycle()
     PageColorSource(state.accent?.let { ColorSource.Seed(it) })
+    // Fully downloaded: every remote track is on the device, so the menu offers removal instead.
+    val albumDownloaded = state.songs.filter { it.isRemote }.let { remote -> remote.isNotEmpty() && remote.all { it.isDownloaded } }
 
     val listState = rememberLazyListState()
     val settled = rememberTransitionSettled()
@@ -205,9 +209,9 @@ fun AlbumRoute(
                     )
                     if (albumId < 0L) {
                         DropdownMenuItem(
-                            text = { Text("Download album") },
-                            leadingIcon = { SymbolIcon(Symbols.Download, null) },
-                            onClick = { close(); viewModel.downloadAlbum() },
+                            text = { Text(if (albumDownloaded) "Remove downloads" else "Download album") },
+                            leadingIcon = { SymbolIcon(if (albumDownloaded) Symbols.OfflinePin else Symbols.Download, null, fill = if (albumDownloaded) 1f else 0f) },
+                            onClick = { close(); if (albumDownloaded) viewModel.removeAlbumDownloads() else viewModel.downloadAlbum() },
                         )
                         DropdownMenuItem(
                             text = { Text("Share via Navidrome") },
@@ -312,6 +316,7 @@ private fun LazyListScope.trackList(state: AlbumUiState, viewModel: AlbumViewMod
                 onAddToQueue = { viewModel.addToQueue(listOf(song)) },
                 onAddToPlaylist = { onAddToPlaylist(listOf(song)) },
                 onToggleFavourite = { viewModel.toggleFavourite(song) },
+                onToggleDownload = { if (song.isDownloaded) viewModel.removeSongDownload(song) else viewModel.downloadSong(song) },
                 onOpenArtist = { onOpenArtist(if (song.artist.equals(state.artist, true)) state.artists.first() else song.artist) },
             )
         }
@@ -342,6 +347,7 @@ private fun TrackRow(
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onToggleFavourite: () -> Unit,
+    onToggleDownload: () -> Unit,
     onOpenArtist: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -351,6 +357,7 @@ private fun TrackRow(
     Box {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                .offlineDim(LocalOfflineDim.current.song(song))
                 .combinedClickable(
                     onLongClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -394,6 +401,13 @@ private fun TrackRow(
                 leadingIcon = { SymbolIcon(Symbols.Favorite, null, fill = if (favourite) 1f else 0f) },
                 onClick = { menu = false; onToggleFavourite() },
             )
+            if (song.isRemote) {
+                DropdownMenuItem(
+                    text = { Text(if (song.isDownloaded) "Remove offline download" else "Download for offline") },
+                    leadingIcon = { SymbolIcon(if (song.isDownloaded) Symbols.OfflinePin else Symbols.Download, null, fill = if (song.isDownloaded) 1f else 0f) },
+                    onClick = { menu = false; onToggleDownload() },
+                )
+            }
             DropdownMenuItem(text = { Text("Go to artist") }, leadingIcon = { SymbolIcon(Symbols.Artist, null) }, onClick = { menu = false; onOpenArtist() })
         }
     }

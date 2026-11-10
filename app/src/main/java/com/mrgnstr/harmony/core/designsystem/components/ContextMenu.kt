@@ -69,9 +69,12 @@ import com.mrgnstr.harmony.core.model.Song
 import com.mrgnstr.harmony.core.playback.PlayerConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -198,6 +201,18 @@ class MediaMenuViewModel @Inject constructor(
         viewModelScope.launch {
             val songs = library.albumSongs(album.id, album.title).first()
             downloads.downloadSongs(songs)
+        }
+    }
+
+    /** True when the album has remote tracks and every one of them is on the device. */
+    fun albumDownloaded(album: Album): Flow<Boolean> = library.albumSongs(album.id, album.title).map { songs ->
+        val remote = songs.filter { it.isRemote }
+        remote.isNotEmpty() && remote.all { it.isDownloaded }
+    }.distinctUntilChanged()
+
+    fun removeAlbumDownloads(album: Album) {
+        viewModelScope.launch {
+            library.albumSongs(album.id, album.title).first().filter { it.isDownloaded }.forEach { downloads.removeDownload(it) }
         }
     }
 
@@ -529,6 +544,7 @@ fun AlbumContextMenu(
     var playlistFor by remember { mutableStateOf<List<Song>?>(null) }
     var showShareSheet by remember { mutableStateOf(false) }
     var localRating by remember(album.id) { mutableIntStateOf(0) }
+    val downloaded by remember(album.id, album.title) { viewModel.albumDownloaded(album) }.collectAsStateWithLifecycle(false)
 
     CenteredDropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         DropdownMenuItem(
@@ -566,9 +582,12 @@ fun AlbumContextMenu(
         )
         if (album.id < 0L) {
             DropdownMenuItem(
-                text = { Text("Download album") },
-                leadingIcon = { SymbolIcon(Symbols.Download, null) },
-                onClick = { onDismiss(); viewModel.downloadAlbum(album) },
+                text = { Text(if (downloaded) "Remove downloads" else "Download album") },
+                leadingIcon = { SymbolIcon(if (downloaded) Symbols.OfflinePin else Symbols.Download, null, fill = if (downloaded) 1f else 0f) },
+                onClick = {
+                    onDismiss()
+                    if (downloaded) viewModel.removeAlbumDownloads(album) else viewModel.downloadAlbum(album)
+                },
             )
             DropdownMenuItem(
                 text = { Text("Share via Navidrome") },

@@ -7,6 +7,7 @@ import com.mrgnstr.harmony.core.datastore.SettingsStore
 import com.mrgnstr.harmony.core.model.Album
 import com.mrgnstr.harmony.core.model.Artist
 import com.mrgnstr.harmony.core.model.ArtistIndex
+import com.mrgnstr.harmony.core.database.AlbumKey
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.owner
 import com.mrgnstr.harmony.core.model.Genre
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 
 @Singleton
@@ -35,6 +37,11 @@ class LibraryRepository @Inject constructor(
     @ApplicationScope scope: CoroutineScope,
 ) {
     private val allSongs: Flow<List<Song>> = dao.observeAll().map { rows -> rows.map { it.toModel() } }.flowOn(Dispatchers.Default)
+
+    /** Releases with at least one track that plays without a connection: a local file or a downloaded one. */
+    val playableOffline: Flow<Set<AlbumKey>> = allSongs.map { list ->
+        list.filter { !it.isRemote || it.isDownloaded }.mapTo(HashSet()) { AlbumKey(it.albumId, it.album) }
+    }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     val songs: Flow<List<Song>> = combine(allSongs, settings.librarySourceMode) { list, mode ->
         when (mode) {

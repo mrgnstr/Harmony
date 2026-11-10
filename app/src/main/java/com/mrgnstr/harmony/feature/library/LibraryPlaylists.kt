@@ -66,6 +66,7 @@ import com.mrgnstr.harmony.core.designsystem.LocalSideInsets
 import com.mrgnstr.harmony.core.designsystem.LocalTopBarInset
 import com.mrgnstr.harmony.core.designsystem.components.ArtworkTile
 import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
+import com.mrgnstr.harmony.core.download.OfflineDownloadManager
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
 import com.mrgnstr.harmony.core.designsystem.components.PlayShuffleButtons
 import com.mrgnstr.harmony.core.designsystem.components.PlaylistCover
@@ -286,6 +287,7 @@ class PlaylistDetailViewModel @AssistedInject constructor(
     private val library: LibraryRepository,
     private val colorStore: ArtworkColorStore,
     private val player: PlayerConnection,
+    private val downloads: OfflineDownloadManager,
 ) : ViewModel() {
     @AssistedFactory
     interface Factory {
@@ -364,6 +366,11 @@ class PlaylistDetailViewModel @AssistedInject constructor(
     fun addToQueue(song: Song) = player.playLast(listOf(song))
     fun playNextAll() = player.playNext(state.value.entries.map { it.song })
     fun addAllToQueue() = player.playLast(state.value.entries.map { it.song })
+    fun downloadAll() = downloads.downloadSongs(state.value.entries.map { it.song })
+    fun removeAllDownloads() {
+        val songs = state.value.entries.map { it.song }.filter { it.isDownloaded }
+        viewModelScope.launch { songs.forEach { downloads.removeDownload(it) } }
+    }
     fun toggleFavourite(song: Song) { viewModelScope.launch { favourites.toggleSong(song.id) } }
     fun removeEntry(entryId: Long) {
         viewModelScope.launch {

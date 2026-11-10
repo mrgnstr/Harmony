@@ -161,7 +161,7 @@ fun HarmonyApp(dark: Boolean, tier: VisualTier, chromeBlur: BlurMode, coverBlur:
             val permission = rememberAudioPermissionState()
             val connectVm: com.mrgnstr.harmony.core.designsystem.components.NavidromeConnectViewModel = hiltViewModel()
             val activeServer by connectVm.repository.activeAccount.collectAsStateWithLifecycle()
-            if (permission.granted || activeServer != null) Shell(nav, openPlayer, schemes, dark) else OnboardingScreen(permission)
+            if (permission.granted || activeServer != null) ProvideOfflineDim { Shell(nav, openPlayer, schemes, dark) } else OnboardingScreen(permission)
         }
     }
 }

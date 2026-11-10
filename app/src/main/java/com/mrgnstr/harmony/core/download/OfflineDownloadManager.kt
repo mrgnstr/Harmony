@@ -71,7 +71,7 @@ class OfflineDownloadManager @Inject constructor(
     fun downloadSong(song: Song) = downloadSongs(listOf(song))
 
     fun downloadSongs(songs: List<Song>) {
-        val remoteSongs = songs.filter { it.isRemote && !it.remoteId.isNullOrBlank() && it.id !in _downloadingIds.value }
+        val remoteSongs = songs.filter { it.isRemote && !it.isDownloaded && !it.remoteId.isNullOrBlank() && it.id !in _downloadingIds.value }
         if (remoteSongs.isEmpty()) return
         _queue.update { it.copy(total = it.total + remoteSongs.size) }
         scope.launch {

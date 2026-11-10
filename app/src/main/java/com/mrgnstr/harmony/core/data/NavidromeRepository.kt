@@ -37,6 +37,7 @@ import com.mrgnstr.harmony.core.model.normalizeServerUrl
 import com.mrgnstr.harmony.core.network.MiniJson
 import com.mrgnstr.harmony.core.network.NavidromeHttpClient
 import com.mrgnstr.harmony.core.network.NavidromeNativeClient
+import com.mrgnstr.harmony.core.device.NetworkMonitor
 import com.mrgnstr.harmony.core.network.NavidromeServerEvent
 import com.mrgnstr.harmony.core.network.NavidromeSseClient
 import com.mrgnstr.harmony.core.network.SubsonicApiClient
@@ -57,6 +58,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -81,9 +83,11 @@ class NavidromeRepository @Inject constructor(
     private val transcodeNegotiator: TranscodeNegotiator,
     private val colorStore: ArtworkColorStore,
     private val settings: SettingsStore,
+    private val network: NetworkMonitor,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val syncMutex = Mutex()
+    private val flushMutex = Mutex()
     private var sseJob: Job? = null
 
     val accounts: StateFlow<List<ServerAccount>> = navidromeDao.observeAccounts()
@@ -126,6 +130,10 @@ class NavidromeRepository @Inject constructor(
         .flowOn(Dispatchers.Default)
 
     init {
+        // Changes made offline wait in the outbox; send them as soon as the connection is back.
+        scope.launch {
+            network.online.filter { it }.collect { runCatching { flushPendingMutations() } }
+        }
         http.onJwtRefreshed = { serverId, newJwt ->
             scope.launch { navidromeDao.updateJwtToken(serverId, newJwt) }
         }
@@ -684,6 +692,11 @@ class NavidromeRepository @Inject constructor(
 
     suspend fun flushPendingMutations(account: ServerAccount? = activeAccount.value) {
         val acc = account ?: return
+        // One flush at a time: the start-up, sync and reconnect triggers can overlap and would send a change twice.
+        flushMutex.withLock { flushPending(acc) }
+    }
+
+    private suspend fun flushPending(acc: ServerAccount) {
         val pending = navidromeDao.pendingMutations(acc.id)
         for (m in pending) {
             val succeeded = runCatching {

@@ -101,6 +101,7 @@ import com.mrgnstr.harmony.core.designsystem.bleedSides
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
 import com.mrgnstr.harmony.core.designsystem.components.AlbumContextMenu
+import com.mrgnstr.harmony.core.designsystem.components.LocalOfflineDim
 import com.mrgnstr.harmony.core.designsystem.components.ArtistContextMenu
 import com.mrgnstr.harmony.core.designsystem.components.CenteredDropdownMenu
 import com.mrgnstr.harmony.core.designsystem.components.EmptyState
@@ -953,6 +954,7 @@ private fun SearchAlbumRow(
         onClick = { share?.claim(coverKey, owner); onClick() },
         modifier = modifier,
         onLongClick = openMenu,
+        dimmed = LocalOfflineDim.current.album(album),
         leading = {
             ArtworkImage(
                 album.artSongId,

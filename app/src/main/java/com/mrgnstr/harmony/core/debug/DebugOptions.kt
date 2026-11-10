@@ -32,6 +32,9 @@ object DebugOptions {
     /** About one level of noise over the blurred background (see Modifier.dither), against banding on dark covers. */
     val dither = flag("Dither")
 
+    /** Greys out what can't be played offline (see OfflineDim) without touching the network, so it can be checked over wireless adb. */
+    val offline = flag("Pretend to be offline", default = false)
+
     val all: List<DebugFlag> get() = registry
 }
 
