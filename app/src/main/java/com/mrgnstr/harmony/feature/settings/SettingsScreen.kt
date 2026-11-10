@@ -63,6 +63,7 @@ import androidx.lifecycle.viewModelScope
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.data.SyncState
 import com.mrgnstr.harmony.core.datastore.SettingsStore
+import com.mrgnstr.harmony.core.debug.DebugOptions
 import com.mrgnstr.harmony.core.designsystem.components.MediaRow
 import com.mrgnstr.harmony.core.designsystem.components.NavidromeConnectSheet
 import com.mrgnstr.harmony.core.designsystem.components.PageScaffold
@@ -612,6 +613,37 @@ fun SettingsRoute(
                             leading = { SymbolIcon(Symbols.Palette, null, tint = MaterialTheme.colorScheme.primary) },
                             onClick = onOpenGallery,
                         )
+                    }
+                }
+            }
+        }
+
+        // 6. Debug options: only in builds that have them (see DebugOptions).
+        if (DebugOptions.enabled) {
+            item(key = "debug-heading") {
+                SectionHeading("Debug")
+            }
+            item(key = "debug-card") {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                ) {
+                    Column(Modifier.padding(vertical = 8.dp)) {
+                        SwitchSettingRow(
+                            title = "Switches over the cover",
+                            subtitle = "Now Playing; swipe sideways on the cover to hide or show them",
+                            checked = DebugOptions.overlayVisible,
+                            onCheckedChange = { DebugOptions.overlayVisible = it },
+                        )
+                        DebugOptions.all.forEach { flag ->
+                            SwitchSettingRow(
+                                title = flag.label,
+                                subtitle = if (flag.on) "On" else "Off",
+                                checked = flag.on,
+                                onCheckedChange = { flag.on = it },
+                            )
+                        }
                     }
                 }
             }

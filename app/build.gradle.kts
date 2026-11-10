@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// Debug options (Settings > Debug, the cover overlay): always in debug builds, off in release unless built with -PdebugOptions=true
+// (a release build for judging performance with the switches in it).
+val releaseDebugOptions = (project.findProperty("debugOptions") as String?) == "true"
+
 android {
     namespace = "com.mrgnstr.harmony"
     compileSdk = 37
@@ -19,7 +23,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "DEBUG_OPTIONS", "true")
+        }
         release {
+            buildConfigField("boolean", "DEBUG_OPTIONS", releaseDebugOptions.toString())
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -35,7 +43,10 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     sourceSets["androidTest"].assets.srcDir("schemas")
 
