@@ -34,8 +34,9 @@ google-services.json
 # Android Profiling
 *.hprof
 
-# Local design references and agent instructions
+# Local design references, working docs and agent instructions
 REFERENCE SCREENSHOTS/
+/docs/
 /CLAUDE.md
 
 # Python
