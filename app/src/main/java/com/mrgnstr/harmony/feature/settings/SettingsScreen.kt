@@ -73,6 +73,7 @@ import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.download.OfflineDownloadManager
 import com.mrgnstr.harmony.core.model.BlurMode
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
+import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.MissingFileItem
 import com.mrgnstr.harmony.core.model.MusicFolder
 import com.mrgnstr.harmony.core.model.ReplayGainMode
@@ -108,6 +109,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
     val coverBlur: StateFlow<BlurMode> = settings.coverBlur
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
+    val lyricsPriority: StateFlow<LyricsPriority> = settings.lyricsPriority
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LyricsPriority.FilesFirst)
     val sourceMode: StateFlow<LibrarySourceMode> = settings.librarySourceMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibrarySourceMode.All)
     val wifiQuality: StateFlow<StreamQuality> = settings.wifiStreamQuality
@@ -152,6 +155,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) { viewModelScope.launch { settings.setThemeMode(mode) } }
     fun setGlassBlur(mode: BlurMode) { viewModelScope.launch { settings.setGlassBlur(mode) } }
     fun setCoverBlur(mode: BlurMode) { viewModelScope.launch { settings.setCoverBlur(mode) } }
+    fun setLyricsPriority(priority: LyricsPriority) { viewModelScope.launch { settings.setLyricsPriority(priority) } }
     fun setSourceMode(mode: LibrarySourceMode) { viewModelScope.launch { settings.setLibrarySourceMode(mode) } }
     fun setWifiQuality(quality: StreamQuality) { viewModelScope.launch { settings.setWifiStreamQuality(quality) } }
     fun setMobileQuality(quality: StreamQuality) { viewModelScope.launch { settings.setMobileStreamQuality(quality) } }
@@ -183,6 +187,7 @@ fun SettingsRoute(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val glassBlur by viewModel.glassBlur.collectAsStateWithLifecycle()
     val coverBlur by viewModel.coverBlur.collectAsStateWithLifecycle()
+    val lyricsPriority by viewModel.lyricsPriority.collectAsStateWithLifecycle()
     val sourceMode by viewModel.sourceMode.collectAsStateWithLifecycle()
     val wifiQuality by viewModel.wifiQuality.collectAsStateWithLifecycle()
     val mobileQuality by viewModel.mobileQuality.collectAsStateWithLifecycle()
@@ -618,7 +623,30 @@ fun SettingsRoute(
             }
         }
 
-        // 6. Debug options: only in builds that have them (see DebugOptions).
+        // 6. Lyrics
+        item(key = "lyrics-heading") {
+            SectionHeading("Lyrics")
+        }
+        item(key = "lyrics-card") {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                Column(Modifier.padding(vertical = 8.dp)) {
+                    DropdownSettingRow(
+                        title = "Lyrics source",
+                        subtitle = lyricsPriority.description,
+                        options = LyricsPriority.entries,
+                        selected = lyricsPriority,
+                        optionLabel = { it.label },
+                        onSelect = viewModel::setLyricsPriority,
+                    )
+                }
+            }
+        }
+
+        // 7. Debug options: only in builds that have them (see DebugOptions).
         if (DebugOptions.enabled) {
             item(key = "debug-heading") {
                 SectionHeading("Debug")

@@ -13,6 +13,7 @@ import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.ReplayGainMode
 import com.mrgnstr.harmony.core.model.StreamQuality
 import com.mrgnstr.harmony.core.model.ThemeMode
@@ -51,6 +52,15 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     suspend fun setGlassBlur(mode: BlurMode) { context.settingsDataStore.edit { it[glassBlurKey] = mode.name } }
 
     suspend fun setCoverBlur(mode: BlurMode) { context.settingsDataStore.edit { it[coverBlurKey] = mode.name } }
+
+    private val lyricsPriorityKey = stringPreferencesKey("lyrics_priority")
+
+    /** Lyrics files beside a song or the lyrics in its tags first (files by default: they carry word timing and voices). */
+    val lyricsPriority: Flow<LyricsPriority> = context.settingsDataStore.data.map { prefs ->
+        LyricsPriority.entries.firstOrNull { it.name == prefs[lyricsPriorityKey] } ?: LyricsPriority.FilesFirst
+    }
+
+    suspend fun setLyricsPriority(priority: LyricsPriority) { context.settingsDataStore.edit { it[lyricsPriorityKey] = priority.name } }
 
     private val systemBarFadeKey = booleanPreferencesKey("system_bar_fade")
 

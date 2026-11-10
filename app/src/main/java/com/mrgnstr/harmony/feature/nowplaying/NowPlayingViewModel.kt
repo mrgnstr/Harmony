@@ -106,8 +106,8 @@ class NowPlayingViewModel @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val lyrics: StateFlow<Lyrics?> = combine(player.state.map { it.songId }.distinctUntilChanged(), lyricsRefresh) { songId, _ -> songId }
-        .mapLatest { songId -> if (songId != null) lyricsRepository.lyricsFor(songId) else null }
+    val lyrics: StateFlow<Lyrics?> = combine(player.state.map { it.songId }.distinctUntilChanged(), lyricsRefresh, settings.lyricsPriority) { songId, _, priority -> songId to priority }
+        .mapLatest { (songId, priority) -> if (songId != null) lyricsRepository.lyricsFor(songId, priority) else null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** The cover heavily blurred, small: the lyrics' background where the live blur is off. */
