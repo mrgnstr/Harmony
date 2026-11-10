@@ -26,21 +26,22 @@ import com.materialkolor.dynamiccolor.ColorSpec
 /** Where the app's colours come from right now. */
 @Immutable
 sealed interface ColorSource {
-    /** Material You: the system's wallpaper colours (API 31+), else [FallbackSeed]. */
+    /** The app's own accent: the user's preset if they picked one, else Material You's wallpaper colours (API 31+), else [FallbackSeed]. */
     data object Wallpaper : ColorSource
 
     /** A colour picked from artwork (album cover, artist image). */
     data class Seed(val argb: Int) : ColorSource
 }
 
-/** Used when the system has no wallpaper colours (below API 31). Material's baseline purple until there is a setting. */
+/** Used when the system has no wallpaper colours (below API 31) and the user picked no accent. Material's baseline purple. */
 val FallbackSeed = Color(0xFF6750A4)
 
 /**
- * Builds and caches colour schemes. Wallpaper schemes come from the system; seeds go through MaterialKolor (the same
+ * Builds and caches colour schemes. Wallpaper schemes come from the system, or from [accent] (the user's preset, a seed) when
+ * there is one; seeds go through MaterialKolor (the same
  * dynamic-colour algorithm, 2025 spec) so an album page looks like the system would theme that colour.
  */
-class SchemeFactory(private val context: Context) {
+class SchemeFactory(private val context: Context, private val accent: Int? = null) {
     private val cache = object : LinkedHashMap<Triple<ColorSource, Boolean, PaletteStyle?>, ColorScheme>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Triple<ColorSource, Boolean, PaletteStyle?>, ColorScheme>) = size > 24
     }
@@ -50,7 +51,9 @@ class SchemeFactory(private val context: Context) {
         cache.getOrPut(Triple(source, dark, style)) {
             when (source) {
                 ColorSource.Wallpaper ->
-                    if (Build.VERSION.SDK_INT >= 31) {
+                    if (accent != null) {
+                        fromSeed(Color(accent), dark, style ?: PaletteStyle.TonalSpot)
+                    } else if (Build.VERSION.SDK_INT >= 31) {
                         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
                     } else fromSeed(FallbackSeed, dark, style ?: PaletteStyle.TonalSpot)
                 is ColorSource.Seed -> fromSeed(Color(source.argb), dark, style ?: styleOf(source.argb))

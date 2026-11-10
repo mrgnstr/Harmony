@@ -6,6 +6,9 @@
 package com.mrgnstr.harmony.feature.settings
 
 import android.content.Intent
+import android.os.Build
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,9 +22,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,13 +59,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.mrgnstr.harmony.core.appicon.AppIcon
+import com.mrgnstr.harmony.core.appicon.AppIconShape
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.data.SyncState
 import com.mrgnstr.harmony.core.datastore.SettingsStore
@@ -70,7 +87,9 @@ import com.mrgnstr.harmony.core.designsystem.components.PageScaffold
 import com.mrgnstr.harmony.core.designsystem.components.SectionHeading
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
+import com.mrgnstr.harmony.core.designsystem.theme.FallbackSeed
 import com.mrgnstr.harmony.core.download.OfflineDownloadManager
+import com.mrgnstr.harmony.core.model.AccentColor
 import com.mrgnstr.harmony.core.model.BlurMode
 import com.mrgnstr.harmony.core.model.TabBarSide
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
@@ -110,6 +129,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
     val coverBlur: StateFlow<BlurMode> = settings.coverBlur
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BlurMode.Auto)
+    val accent: StateFlow<AccentColor> = settings.accent
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AccentColor.Wallpaper)
     val tabBarSide: StateFlow<TabBarSide> = settings.tabBarSide
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TabBarSide.Left)
     val lyricsPriority: StateFlow<LyricsPriority> = settings.lyricsPriority
@@ -158,6 +179,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) { viewModelScope.launch { settings.setThemeMode(mode) } }
     fun setGlassBlur(mode: BlurMode) { viewModelScope.launch { settings.setGlassBlur(mode) } }
     fun setCoverBlur(mode: BlurMode) { viewModelScope.launch { settings.setCoverBlur(mode) } }
+    fun setAccent(accent: AccentColor) { viewModelScope.launch { settings.setAccent(accent) } }
     fun setTabBarSide(side: TabBarSide) { viewModelScope.launch { settings.setTabBarSide(side) } }
     fun setLyricsPriority(priority: LyricsPriority) { viewModelScope.launch { settings.setLyricsPriority(priority) } }
     fun setSourceMode(mode: LibrarySourceMode) { viewModelScope.launch { settings.setLibrarySourceMode(mode) } }
@@ -192,6 +214,7 @@ fun SettingsRoute(
     val glassBlur by viewModel.glassBlur.collectAsStateWithLifecycle()
     val coverBlur by viewModel.coverBlur.collectAsStateWithLifecycle()
     val tabBarSide by viewModel.tabBarSide.collectAsStateWithLifecycle()
+    val accent by viewModel.accent.collectAsStateWithLifecycle()
     val lyricsPriority by viewModel.lyricsPriority.collectAsStateWithLifecycle()
     val sourceMode by viewModel.sourceMode.collectAsStateWithLifecycle()
     val wifiQuality by viewModel.wifiQuality.collectAsStateWithLifecycle()
@@ -211,6 +234,9 @@ fun SettingsRoute(
     var showQuickConnectAuthorize by remember { mutableStateOf(false) }
     var showAddRadioDialog by remember { mutableStateOf(false) }
     var showSharesSheet by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var appIcon by remember { mutableStateOf(AppIcon.current(context)) }
+    var showAppIconSheet by remember { mutableStateOf(false) }
     var showMissingFilesSheet by remember { mutableStateOf(false) }
     var downloadedBytes by remember { mutableLongStateOf(0L) }
     val scope = rememberCoroutineScope()
@@ -616,6 +642,24 @@ fun SettingsRoute(
                         optionLabel = { it.name },
                         onSelect = viewModel::setCoverBlur,
                     )
+                    MediaRow(
+                        title = "Accent Colour",
+                        subtitle = if (accent == AccentColor.Wallpaper) {
+                            if (Build.VERSION.SDK_INT >= 31) "From your wallpaper" else "Default"
+                        } else "${accent.displayLabel()}, on pages without a colour of their own",
+                        onClick = {},
+                    )
+                    AccentSwatches(
+                        selected = accent,
+                        onSelect = viewModel::setAccent,
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                    )
+                    MediaRow(
+                        title = "App Icon",
+                        subtitle = "${appIcon.shape.label}, ${appIcon.color.displayLabel()}",
+                        leading = { AppIconImage(appIcon, Modifier.size(40.dp)) },
+                        onClick = { showAppIconSheet = true },
+                    )
                     // Only tablets choose; phones' bar is locked to their bottom edge.
                     if (com.mrgnstr.harmony.core.designsystem.LocalWindowLayout.current.isTablet) {
                         DropdownSettingRow(
@@ -723,6 +767,15 @@ fun SettingsRoute(
         )
     }
 
+    if (showAppIconSheet) {
+        AppIconSheet(
+            current = appIcon,
+            accent = accent,
+            onApply = { AppIcon.select(context, it); appIcon = it },
+            onDismiss = { showAppIconSheet = false },
+        )
+    }
+
     if (showSharesSheet) {
         ManageSharesSheet(
             navidrome = viewModel.navidrome,
@@ -735,6 +788,130 @@ fun SettingsRoute(
             navidrome = viewModel.navidrome,
             onDismiss = { showMissingFilesSheet = false },
         )
+    }
+}
+
+/** "Wallpaper" means nothing below API 31, where there are no wallpaper colours: the fixed palette is just the default. */
+private fun AccentColor.displayLabel() =
+    if (this == AccentColor.Wallpaper && Build.VERSION.SDK_INT < 31) "Default" else label
+
+/** The colour that stands for an accent in a swatch. */
+@Composable
+private fun AccentColor.swatch(): Color = when {
+    seed != null -> Color(seed!!)
+    Build.VERSION.SDK_INT >= 31 -> colorResource(android.R.color.system_accent1_500)
+    else -> FallbackSeed
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AccentSwatches(selected: AccentColor, onSelect: (AccentColor) -> Unit, modifier: Modifier = Modifier) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier,
+    ) {
+        AccentColor.entries.forEach { accent ->
+            val on = accent == selected
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(accent.swatch())
+                    .selectable(selected = on, role = Role.RadioButton) { onSelect(accent) }
+                    .semantics { contentDescription = accent.displayLabel() },
+            ) {
+                when {
+                    on -> SymbolIcon(Symbols.Check, null, tint = Color.White)
+                    // The wallpaper swatch has no colour of its own to be told by.
+                    accent == AccentColor.Wallpaper -> SymbolIcon(Symbols.Palette, null, tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** A launcher icon as the system draws it (adaptive mask; wallpaper colours for the wallpaper variant). */
+@Composable
+private fun AppIconImage(icon: AppIcon, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val bitmap = remember(icon) {
+        icon.resource(context).takeIf { it != 0 }
+            ?.let { ContextCompat.getDrawable(context, it) }?.toBitmap(192, 192)?.asImageBitmap()
+    }
+    if (bitmap != null) Image(bitmap, contentDescription = null, modifier = modifier)
+}
+
+/** Shape and colour are chosen first and applied together: switching the launcher icon restarts the app. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AppIconSheet(
+    current: AppIcon,
+    accent: AccentColor,
+    onApply: (AppIcon) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var picked by remember { mutableStateOf(current) }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+            Text("App Icon", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                maxItemsInEachRow = 5,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            ) {
+                AppIconShape.entries.forEach { shape ->
+                    val on = shape == picked.shape
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        contentColor = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { picked = picked.copy(shape = shape) },
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(68.dp).padding(vertical = 8.dp),
+                        ) {
+                            AppIconImage(AppIcon(shape, picked.color), Modifier.size(52.dp))
+                            Text(
+                                shape.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                "Colour",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 8.dp).padding(top = 16.dp, bottom = 8.dp),
+            )
+            AccentSwatches(
+                selected = picked.color,
+                onSelect = { picked = picked.copy(color = it) },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            if (accent != AccentColor.Wallpaper && picked.color != accent) {
+                TextButton(onClick = { picked = picked.copy(color = accent) }, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("Match the accent colour (${accent.label})")
+                }
+            }
+            Text(
+                "The app restarts to change its icon. Your launcher may take a moment to show it, and may move it on the home screen.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp).padding(top = 12.dp, bottom = 12.dp),
+            )
+            Button(
+                onClick = { onApply(picked) },
+                enabled = picked != current,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            ) { Text("Apply") }
+        }
     }
 }
 

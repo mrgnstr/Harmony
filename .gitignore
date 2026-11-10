@@ -37,3 +37,9 @@ google-services.json
 # Local design references and agent instructions
 REFERENCE SCREENSHOTS/
 /CLAUDE.md
+
+# Python
+__pycache__/
+
+# Icon generator output: previews and candidates (tools/app_icons)
+design/

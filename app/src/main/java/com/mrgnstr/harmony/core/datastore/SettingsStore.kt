@@ -13,6 +13,7 @@ import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.LibrarySort
 import com.mrgnstr.harmony.core.model.LibrarySourceMode
 import com.mrgnstr.harmony.core.model.BlurMode
+import com.mrgnstr.harmony.core.model.AccentColor
 import com.mrgnstr.harmony.core.model.TabBarSide
 import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.ReplayGainMode
@@ -53,6 +54,15 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     suspend fun setGlassBlur(mode: BlurMode) { context.settingsDataStore.edit { it[glassBlurKey] = mode.name } }
 
     suspend fun setCoverBlur(mode: BlurMode) { context.settingsDataStore.edit { it[coverBlurKey] = mode.name } }
+
+    private val accentKey = stringPreferencesKey("accent_color")
+
+    /** The accent that replaces the wallpaper's colours (see [AccentColor]). */
+    val accent: Flow<AccentColor> = context.settingsDataStore.data.map { prefs ->
+        AccentColor.entries.firstOrNull { it.name == prefs[accentKey] } ?: AccentColor.Wallpaper
+    }
+
+    suspend fun setAccent(accent: AccentColor) { context.settingsDataStore.edit { it[accentKey] = accent.name } }
 
     private val tabBarSideKey = stringPreferencesKey("tab_bar_side")
 
