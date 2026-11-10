@@ -36,7 +36,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mrgnstr.harmony.feature.nowplaying.MiniDock
 import com.mrgnstr.harmony.feature.nowplaying.MiniPlayerGap
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.mrgnstr.harmony.core.designsystem.motion.Springs
 import com.mrgnstr.harmony.feature.nowplaying.MiniPlayerHeight
 import com.mrgnstr.harmony.feature.nowplaying.NowPlayingViewModel
 import com.mrgnstr.harmony.feature.nowplaying.PlayerSheet
@@ -219,11 +222,29 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
         if (tier.value == VisualTier.LOW) position.animateTo(target, tween(180, easing = FastOutSlowInEasing))
         else position.animateTo(target, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
     }
+    // The tab bar minimizes to the selected tab's circle while the pages scroll down (iOS 26), and the mini player moves in beside it.
+    val minimize = rememberBarMinimize()
+    // Only with a mini player: without one the bar stays whole (and goes back to whole when the last song is cleared).
+    LaunchedEffect(hasMedia) {
+        minimize.enabled = hasMedia
+        if (!hasMedia) minimize.expand()
+    }
+    val barMinimize = remember { Animatable(0f) }
+    val minimized = minimize.minimized && nav.current != Tab.Search
+    LaunchedEffect(minimized) { barMinimize.animateTo(if (minimized) 1f else 0f, Springs.land(stiffness = 450f, visibilityThreshold = 0.001f)) }
+    // The same scrolling minimizes the bar on the Search tab, but there the pill folds away entirely and the mini player takes its
+    // side; the Search button (like scrolling back up) brings it back.
+    val foldTarget = minimize.minimized && nav.current == Tab.Search
+    val barFold = remember { Animatable(0f) }
+    LaunchedEffect(foldTarget) { barFold.animateTo(if (foldTarget) 1f else 0f, Springs.land(stiffness = 450f, visibilityThreshold = 0.001f)) }
+    // A new tab or page starts with the full bar.
+    LaunchedEffect(nav.current, nav.stackOf(nav.current).lastOrNull()) { minimize.expand() }
     // The notification was tapped: open Now Playing.
     androidx.compose.runtime.LaunchedEffect(openPlayer) { if (openPlayer > 0) sheet.expand() }
     var rootHeightPx by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    // Pages pad for the tab bar and, with a song loaded, the mini player resting above it.
-    val bottomInset = if (hasMedia) barTop + MiniPlayerGap + MiniPlayerHeight else barTop
+    // Pages pad for the tab bar only: scrolled to the end the bar is minimized and the mini player sits in its row, so no room is kept
+    // for the mini player above it.
+    val bottomInset = barTop
 
     val entries = remember(nav) {
         val openSettings = { nav.push(Dest.Settings); Unit }
@@ -348,7 +369,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                     SurfaceFill()
                     // Every tab keeps its own NavDisplay alive, laid side by side and slid as a row: switching tabs builds nothing (a page
                     // is built once, keeps its scroll and state), where one NavDisplay swapping back stacks rebuilt the whole page mid-slide.
-                    Box(Modifier.fillMaxSize().chromeSource(blur)) {
+                    Box(Modifier.fillMaxSize().nestedScroll(minimize.connection).chromeSource(blur)) {
                         Tab.entries.forEach { tab ->
                             // A tab is built on its first visit (the others shortly after launch, see above) and then stays.
                             if (tab in built) key(tab) {
@@ -382,17 +403,28 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                             current = nav.current,
                             onSelect = nav::select,
                             blur = blur,
+                            minimize = { barMinimize.value },
+                            onExpand = minimize::expand,
+                            fold = { barFold.value },
+                            onSearchAgain = minimize::expand,
+                            sideSlide = { sheet.progress.value.coerceIn(0f, 1f) },
                             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = navBottom + AppBarEdgeGap)
                                 // The open player slides the bar off the bottom; a mini player thrown down pushes it the same way (capped), and
                                 // once the pill is gone the push springs back on its own.
                                 .graphicsLayer {
-                                    val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx()
+                                    // Minimized, the bar's buttons leave to the sides instead (AppBar's sideSlide), so it does not also go down.
+                                    val docked = maxOf(barMinimize.value, barFold.value)
+                                    val slide = sheet.progress.value.coerceIn(0f, 1f) * (barTop + 16.dp).toPx() * (1f - docked)
                                     val cap = 0.1f * (rootHeightPx - (barTop + MiniPlayerGap + MiniPlayerHeight).toPx())
                                     val pushed = sheet.barPush
                                     translationY = maxOf(slide, if (pushed > 0f && cap > 0f) cap * kotlin.math.tanh(pushed / cap) else 0f)
                                 },
                         )
-                        PlayerSheet(sheet, restingBottom = barTop + MiniPlayerGap, blur = blur)
+                        PlayerSheet(
+                            sheet, restingBottom = barTop + MiniPlayerGap, blur = blur,
+                            onThrownDown = minimize::collapse,
+                            dock = MiniDock({ maxOf(barMinimize.value, barFold.value) }, drop = MiniPlayerGap + AppBarHeight, left = AppBarHeight + BarGap, right = AppBarHeight + BarGap, fold = { barFold.value }),
+                        )
                     }
                 }
             }

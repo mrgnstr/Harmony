@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -43,6 +45,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -86,6 +89,8 @@ import com.mrgnstr.harmony.core.designsystem.dither
 import com.mrgnstr.harmony.core.designsystem.LocalVisualTier
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
+import com.mrgnstr.harmony.core.designsystem.blur.FloatingChromeMargin
+import com.mrgnstr.harmony.core.designsystem.blur.FloatingChromeWidth
 import com.mrgnstr.harmony.core.designsystem.icons.SymbolIcon
 import com.mrgnstr.harmony.core.designsystem.icons.Symbols
 import com.mrgnstr.harmony.core.device.VisualTier
@@ -97,7 +102,6 @@ import kotlinx.coroutines.launch
 
 val MiniPlayerHeight = 64.dp
 val MiniPlayerGap = 8.dp
-private val MiniMargin = 12.dp
 private val MiniArt = 44.dp
 private val MiniArtRadius = 8.dp
 private val PanelCoverRadius = 12.dp
@@ -110,6 +114,8 @@ private const val StripsFadeEnd = 0.3f
 private val MiniArtInset = 14.dp
 /** Release speed in dp/s that throws the mini player away (as tuned in the old app: 2000 px/s on the 11T, without being harder on lower densities). */
 private val DismissFling = 725.dp
+/** Thrown down from Now Playing so hard that the pill sags this far into the tab bar, the bar is left minimized (it first touches it at [MiniPlayerGap]). */
+private val DigInDepth = 30.dp
 private const val CoverArcBend = 1.6f
 private const val CoverCenterBend = 2f
 private fun coverRise(p: Float) = p.pow(CoverArcBend)
@@ -147,6 +153,13 @@ private class ScreenCorners(val tl: Float, val tr: Float, val br: Float, val bl:
     }
 }
 
+/**
+ * Where the mini player sits when the tab bar is minimized: down on the bar's row, between the bar's circle and the search button.
+ * [progress] is how far it has moved down; [drop] is how far down that is, [left] / [right] the room the two buttons take. On the
+ * Search tab the bar's pill folds away ([fold] 1) and the mini player takes the whole left side, so [left] is not reserved.
+ */
+class MiniDock(val progress: () -> Float, val drop: Dp, val left: Dp, val right: Dp, val fold: () -> Float = { 0f })
+
 /** The pill's shape at any size: fully round at [miniH] tall, the display's own corners at [screenH] tall (the height is linear in progress). */
 private class MorphingPillShape(private val miniH: Float, private val screenH: Float, private val corners: ScreenCorners) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
@@ -167,6 +180,8 @@ fun PlayerSheet(
     restingBottom: Dp,
     blur: ChromeBlurState,
     modifier: Modifier = Modifier,
+    dock: MiniDock? = null,
+    onThrownDown: () -> Unit = {},
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
     val snap by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -221,9 +236,16 @@ fun PlayerSheet(
         val screenW = constraints.maxWidth.toFloat()
         val screenH = constraints.maxHeight.toFloat()
         val miniH = with(density) { MiniPlayerHeight.toPx() }
-        val margin = with(density) { MiniMargin.toPx() }
-        val miniW = screenW - 2 * margin
-        val restingTop = screenH - with(density) { restingBottom.toPx() } - miniH
+        // As wide as the tab bar, centred.
+        val fullW = minOf(screenW - 2 * with(density) { FloatingChromeMargin.toPx() }, with(density) { FloatingChromeWidth.toPx() })
+        val fullMargin = (screenW - fullW) / 2f
+        // With the tab bar minimized it moves down beside the bar's circle, narrower. (Read here, so the sheet recomposes while it moves.)
+        val docked = dock?.progress?.invoke() ?: 0f
+        val dockLeft = dock?.let { with(density) { it.left.toPx() } * (1f - it.fold()) } ?: 0f
+        val dockRight = dock?.let { with(density) { it.right.toPx() } } ?: 0f
+        val miniW = fullW - (dockLeft + dockRight) * docked
+        val margin = fullMargin + dockLeft * docked
+        val restingTop = screenH - with(density) { restingBottom.toPx() } + (dock?.let { with(density) { it.drop.toPx() } } ?: 0f) * docked - miniH
         val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
         val navBottom = WindowInsets.navigationBars.getBottom(density).toFloat()
         val miniArt = with(density) { MiniArt.toPx() }
@@ -253,6 +275,17 @@ fun PlayerSheet(
         val showMini by remember { derivedStateOf { state.progress.value < 0.99f } }
         val showGlass by remember { derivedStateOf { state.progress.value < 1f } }
         val travel = restingTop
+        // The pill digging into the tab bar (the sag of a hard throw down, see PlayerSheetState.visual) leaves the bar minimized.
+        val digIn = with(density) { DigInDepth.toPx() }
+        val currentTravel by rememberUpdatedState(travel)
+        val thrownDown by rememberUpdatedState(onThrownDown)
+        LaunchedEffect(state, digIn) {
+            var armed = true
+            snapshotFlow { -state.visual * currentTravel }.collect { sagPx ->
+                if (armed && sagPx >= digIn) { armed = false; thrownDown() }
+                else if (sagPx < digIn / 3f) armed = true
+            }
+        }
         // Swiped away, the pill is thrown down the gap to the tab bar (where it touches it and starts pushing it) and then its own
         // height further, fading over that last stretch; that travel is where it is gone.
         val gapPx = with(density) { MiniPlayerGap.toPx() }
@@ -389,16 +422,22 @@ fun PlayerSheet(
                 ) {
                     // In a panel the full player's title travels here instead (until it is composed, this one stays).
                     Column(Modifier.weight(1f).graphicsLayer { alpha = if (showFull) 1f - panel.open.value else 1f }) {
-                        Text(snap.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(snap.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        MarqueeText(snap.title, MaterialTheme.typography.titleMediumEmphasized, MaterialTheme.colorScheme.onSurface)
+                        MarqueeText(snap.artist, MaterialTheme.typography.bodySmall, MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     MorphingPlayButton(
                         snap.isPlaying, viewModel::togglePlayPause, size = 48.dp, glyph = 24.dp, buffering = snap.isBuffering,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                     val nextKick = rememberSkipKick(next = true, reach = 6.dp)
-                    androidx.compose.material3.IconButton(onClick = { nextKick.kick(); viewModel.next() }, enabled = snap.hasNext) {
-                        SkipIcon(Symbols.SkipNext, "Next", nextKick)
+                    // Beside the minimized bar there is no room for it (as in Music): it fades and gives its width back.
+                    Box(Modifier.width(48.dp * (1f - docked)).clipToBounds().graphicsLayer { alpha = 1f - docked }, contentAlignment = Alignment.Center) {
+                        androidx.compose.material3.IconButton(
+                            onClick = { nextKick.kick(); viewModel.next() }, enabled = snap.hasNext && docked < 0.5f,
+                            modifier = Modifier.requiredWidth(48.dp),
+                        ) {
+                            SkipIcon(Symbols.SkipNext, "Next", nextKick)
+                        }
                     }
                 }
                 }
@@ -580,6 +619,9 @@ fun PlayerSheet(
                                 headerX + headerSize + with(density) { PanelHeaderGap.toPx() } - (miniArtX + miniArt + with(density) { 12.dp.toPx() }),
                                 headerY + headerSize / 2f - miniH / 2f,
                             ),
+                            miniTextWidth = {
+                                miniW - with(density) { (MiniArtInset + MiniArt + 12.dp + 8.dp + 48.dp + 48.dp * (1f - docked)).toPx() }
+                            },
                             miniTitleSize = MaterialTheme.typography.titleMediumEmphasized.fontSize,
                             miniArtistSize = MaterialTheme.typography.bodySmall.fontSize,
                             artists = artists,

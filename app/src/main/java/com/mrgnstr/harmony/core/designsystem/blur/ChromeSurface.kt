@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mrgnstr.harmony.core.designsystem.LocalChromeBlurMode
 import com.mrgnstr.harmony.core.designsystem.LocalVisualTier
@@ -25,6 +26,13 @@ import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
 import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
+
+/**
+ * The most the floating chrome (tab bar with search, mini player) is wide, centred; otherwise it fills the window less
+ * [FloatingChromeMargin] at each side. Unbounded for now (it was 360 dp); set a number to cap it, e.g. for tablets.
+ */
+val FloatingChromeWidth = Dp.Infinity
+val FloatingChromeMargin = 16.dp
 
 /**
  * The floating chrome (tab bar, search button, mini player) blurs what scrolls under it. Backed by Haze; screens only see

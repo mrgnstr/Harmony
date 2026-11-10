@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -188,6 +189,8 @@ internal fun PlayingTitle(
     /** Where the text goes between the panel and the mini player: how far the sheet is open, and the offset (px) from the panel's place to the pill's at 0. */
     sheetProgress: () -> Float,
     miniShift: androidx.compose.ui.geometry.Offset,
+    /** The width (px) the mini player gives its text; the title's room narrows to it on the way, so the scrolling box does not jump at the hand-over. */
+    miniTextWidth: () -> Float,
     miniTitleSize: androidx.compose.ui.unit.TextUnit,
     miniArtistSize: androidx.compose.ui.unit.TextUnit,
     artists: List<String>,
@@ -221,7 +224,14 @@ internal fun PlayingTitle(
     ) {
         // Room for the small cover grows as the panel opens.
         Spacer(Modifier.layout { _, _ -> layout(((PanelCoverSize + PanelHeaderGap).roundToPx() * panel.q().let { it * it }).roundToInt(), 0) {} })
-        Column(Modifier.weight(1f)) {
+        Column(
+            Modifier.weight(1f).layout { measurable, constraints ->
+                val away = (1f - sheetProgress()) * panel.q()
+                val w = androidx.compose.ui.util.lerp(constraints.maxWidth.toFloat(), miniTextWidth(), away).roundToInt().coerceIn(0, constraints.maxWidth)
+                val placeable = measurable.measure(Constraints(minWidth = w, maxWidth = w, maxHeight = constraints.maxHeight))
+                layout(constraints.maxWidth, placeable.height) { placeable.place(0, 0) }
+            },
+        ) {
             // The title opens the album; the artist opens the artist, or a menu to pick one when the credit names several.
             Box(Modifier.clickable(interactionSource = null, indication = null) { onOpenAlbum() }) { MarqueeText(snap.title, title, c.text) }
             var picking by remember { mutableStateOf(false) }
