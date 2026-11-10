@@ -1,6 +1,5 @@
 package com.mrgnstr.harmony.core.designsystem.components
 
-import android.os.Build
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -18,8 +17,7 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import com.mrgnstr.harmony.core.designsystem.LocalVisualTier
-import com.mrgnstr.harmony.core.device.VisualTier
+import com.mrgnstr.harmony.core.designsystem.liveCoverBlur
 
 // Ported as-is from Harmony old (DetailPage.kt), approved there: the numbers are tuned together.
 /** Where the cover's top sits below the status bar. */
@@ -53,7 +51,7 @@ fun LazyListState.coverPast(density: Float, pageWidthPx: Int): Float {
 @Composable
 fun CoverFrame(listState: LazyListState, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocalVisualTier.current != VisualTier.LOW
+    val canBlur = liveCoverBlur()
     Box(modifier.fillMaxWidth().padding(top = statusTop + CoverTop), contentAlignment = Alignment.TopCenter) {
         val shape = RoundedCornerShape(14.dp)
         Box(

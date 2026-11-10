@@ -223,6 +223,8 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
     // The entry lambdas below are remembered: read the factory through a state, or pages keep the old accent's schemes.
     val liveSchemes = androidx.compose.runtime.rememberUpdatedState(schemes)
+    // The page a back uncovers comes into focus from a blur: part of the chrome blur setting.
+    val backBlur = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.blur.liveChromeBlur())
     val blur = rememberChromeBlurState()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val barTop = navBottom + AppBarEdgeGap + AppBarHeight
@@ -389,7 +391,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
             NavEntry(key = key, contentKey = "${key.tab.name}:${entry.contentKey}", metadata = entry.metadata + (TabMetadata to key.tab)) {
                 // Popped, or the top page while a back gesture holds it: the page that is going away backwards.
                 val leavingBack = key !in nav.stackOf(key.tab).map { TabDestination(key.tab, it) } || nav.stackOf(key.tab).lastOrNull() == key.destination
-                BackEffects(leavingBack, backing = nav.lastWasBack || backGesture.value, blurred = tier.value != VisualTier.LOW,
+                BackEffects(leavingBack, backing = nav.lastWasBack || backGesture.value, blurred = backBlur.value,
                     ms = if (backGesture.value || nav.lastBackByGesture) GestureMs else BackMs) {
                     CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, liveSchemes.value, dark, tier.value) { entry.Content() } }
                 }

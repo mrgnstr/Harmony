@@ -51,22 +51,31 @@ val LocalChromeBlurState = staticCompositionLocalOf<ChromeBlurState?> { null }
 /** Marks content the chrome blurs. Higher [zIndex] sources draw over lower ones in the blur. */
 fun Modifier.chromeSource(state: ChromeBlurState, zIndex: Float = 0f): Modifier = hazeSource(state.haze, zIndex = zIndex)
 
-/** Live blur needs API 31; Auto keeps it to the HIGH tier (on MID phones it cost whole frames in the old app). */
+/**
+ * The "Floating Chrome Blur" setting as it applies here. Live blur needs API 31; Auto keeps it to the HIGH tier (on MID phones it
+ * cost whole frames in the old app). Everything that setting governs asks this: the chrome's surfaces, and the blur of the page a
+ * back uncovers.
+ */
 @Composable
-fun liveChromeBlur(state: ChromeBlurState?): Boolean =
-    state != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && when (LocalChromeBlurMode.current) {
+fun liveChromeBlur(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && when (LocalChromeBlurMode.current) {
         BlurMode.Auto -> LocalVisualTier.current == VisualTier.HIGH
         BlurMode.On -> true
         BlurMode.Off -> false
     }
 
-// Tint over the live blur, and the opacity of the flat fallback.
+/** Whether a surface with [state] to blur does blur it. */
+@Composable
+fun liveChromeBlur(state: ChromeBlurState?): Boolean = state != null && liveChromeBlur()
+
+// Tint over the live blur, and the opacity of a surface that cannot blur while the others do (one inside its own source).
+// With the blur off altogether the chrome is opaque: see-through without blur only shows sharp content through the bars.
 private const val BlurTintAlpha = 0.72f
 private const val FlatAlpha = 0.94f
 
 /**
  * A surface of the floating chrome: [container] (default: the scheme's surfaceContainer) over a live blur of [state]'s
- * sources, or nearly opaque [container] where live blur is off or unavailable.
+ * sources, or opaque [container] where live blur is off or unavailable.
  */
 @Composable
 fun ChromeSurface(
@@ -92,7 +101,8 @@ fun ChromeSurface(
             performanceMode = HazePerformanceMode.Performance,
         )
     } else {
-        base.background(container.copy(alpha = FlatAlpha))
+        // Over the opaque surface colour, so a container that carries its own alpha still hides what is under it.
+        if (liveChromeBlur()) base.background(container.copy(alpha = FlatAlpha)) else base.background(opaque).background(container)
     }
     Box(surface) { content() }
 }

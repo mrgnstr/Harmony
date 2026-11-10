@@ -87,6 +87,7 @@ import com.mrgnstr.harmony.core.artwork.CoverExtension
 import com.mrgnstr.harmony.core.artwork.rememberCoverTransition
 import com.mrgnstr.harmony.core.designsystem.dither
 import com.mrgnstr.harmony.core.designsystem.LocalVisualTier
+import com.mrgnstr.harmony.core.designsystem.liveCoverBlur
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
 import com.mrgnstr.harmony.core.designsystem.blur.FloatingChromeMargin
@@ -278,7 +279,7 @@ fun PlayerSheet(
         val listTop = headerY + headerSize + with(density) { 10.dp.toPx() }
         // The lyrics view starts this much above that, under the header, so the fade at its top has room above the lines.
         val listOverlap = with(density) { LyricsTopOverlap.toPx() }
-        val liveBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !lowTier
+        val liveBlur = liveCoverBlur()
         val cover = rememberCoverTransition(songId, snap.albumId, fullArt.roundToInt())
         val showFull by remember { derivedStateOf { state.progress.value > 0.01f } }
         val showMini by remember { derivedStateOf { state.progress.value < 0.99f } }

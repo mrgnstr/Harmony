@@ -626,21 +626,30 @@ fun SettingsRoute(
                         optionLabel = { it.name },
                         onSelect = viewModel::setThemeMode,
                     )
+                    // Live blur of any kind needs Android 12 (API 31): below it both settings do nothing, so they are greyed out.
+                    val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                     DropdownSettingRow(
                         title = "Floating Chrome Blur",
-                        subtitle = glassBlur.name,
+                        subtitle = if (canBlur) "${glassBlur.name} · bars, mini player, back animation and lyrics" else "Needs Android 12 or newer",
                         options = BlurMode.entries,
                         selected = glassBlur,
                         optionLabel = { it.name },
                         onSelect = viewModel::setGlassBlur,
+                        enabled = canBlur,
                     )
                     DropdownSettingRow(
-                        title = "Now Playing Cover Blur",
-                        subtitle = coverBlur.name,
+                        title = "Live Cover Blur",
+                        subtitle = when {
+                            !canBlur -> "Needs Android 12 or newer"
+                            // The blur around the Now Playing cover and the artist image is a shader: Android 13.
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> "${coverBlur.name} · album covers and lyrics only on Android 12"
+                            else -> "${coverBlur.name} · Now Playing, artist and album artwork"
+                        },
                         options = BlurMode.entries,
                         selected = coverBlur,
                         optionLabel = { it.name },
                         onSelect = viewModel::setCoverBlur,
+                        enabled = canBlur,
                     )
                     MediaRow(
                         title = "Accent Colour",
@@ -923,13 +932,15 @@ private fun <T> DropdownSettingRow(
     selected: T,
     optionLabel: (T) -> String,
     onSelect: (T) -> Unit,
+    enabled: Boolean = true,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
         MediaRow(
             title = title,
             subtitle = subtitle,
-            onClick = { open = true },
+            onClick = { if (enabled) open = true },
+            dimmed = !enabled,
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { opt ->

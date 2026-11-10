@@ -16,18 +16,25 @@ import com.mrgnstr.harmony.core.model.BlurMode
 /** Every expensive effect reads this; provided once by [com.mrgnstr.harmony.core.designsystem.theme.HarmonyTheme]. */
 val LocalVisualTier = compositionLocalOf { VisualTier.MID }
 
-/** The user's override for the live blur behind the floating tab bar, search button and mini player. */
+/** The user's override for the live blur of the app's chrome: behind the floating tab bar, search button and mini player, and of the page a back uncovers. */
 val LocalChromeBlurMode = compositionLocalOf { BlurMode.Auto }
 
-/** The user's override for the live blur around the Now Playing cover. */
+/** The user's override for the live blurs of artwork: around the Now Playing cover and the artist hero, the album cover scrolling away, the cover behind the lyrics. */
 val LocalCoverBlurMode = compositionLocalOf { BlurMode.Auto }
 
 /**
- * The "Real-Time Progressive Blur" setting as it applies here: the cover's surroundings (Now Playing, the artist hero) are blurred live per frame
+ * The "Live Cover Blur" setting as it applies to the shader blurs: the cover's surroundings (Now Playing, the artist hero) are blurred live per frame
  * (API 33+, shaders and blur effects); otherwise from copies prerendered once on the CPU.
  */
 @Composable
-fun realTimeBlur(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && when (LocalCoverBlurMode.current) {
+fun realTimeBlur(): Boolean = liveCoverBlur(Build.VERSION_CODES.TIRAMISU)
+
+/**
+ * The "Live Cover Blur" setting for an effect that needs [minSdk] (a plain blur: 31, the default; shaders: 33). Every live blur
+ * of artwork asks this, so the one setting turns them all off; Auto keeps them off the LOW tier.
+ */
+@Composable
+fun liveCoverBlur(minSdk: Int = Build.VERSION_CODES.S): Boolean = Build.VERSION.SDK_INT >= minSdk && when (LocalCoverBlurMode.current) {
     BlurMode.Auto -> LocalVisualTier.current != VisualTier.LOW
     BlurMode.On -> true
     BlurMode.Off -> false
