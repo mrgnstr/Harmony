@@ -52,3 +52,11 @@ fun Modifier.effectThenMask(effect: RenderEffect, mask: Brush): Modifier = this
         drawRect(mask, blendMode = BlendMode.DstIn)
     }
     .graphicsLayer { renderEffect = effect }
+
+/** Keeps the content (as one layer) only where [mask] is opaque. */
+fun Modifier.alphaMask(mask: Brush): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(mask, blendMode = BlendMode.DstIn)
+    }

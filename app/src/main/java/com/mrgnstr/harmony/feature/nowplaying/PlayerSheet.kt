@@ -82,6 +82,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mrgnstr.harmony.core.artwork.CoverBox
 import com.mrgnstr.harmony.core.artwork.CoverExtension
 import com.mrgnstr.harmony.core.artwork.rememberCoverTransition
+import com.mrgnstr.harmony.core.designsystem.dither
 import com.mrgnstr.harmony.core.designsystem.LocalVisualTier
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeBlurState
 import com.mrgnstr.harmony.core.designsystem.blur.ChromeSurface
@@ -444,7 +445,7 @@ fun PlayerSheet(
             val sceneScrim: @Composable () -> Unit = {
                 // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
                 // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
-                if (coverColors.scrim > 0.01f) {
+                if (coverColors.scrim > 0.01f && com.mrgnstr.harmony.core.debug.DebugOptions.scrim.on) {
                     val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
                     val a = coverColors.scrim
                     Box(
@@ -466,7 +467,7 @@ fun PlayerSheet(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
                     alpha = sceneAlpha()
-                },
+                }.then(if (lowTier) Modifier else Modifier.dither()),
             ) {
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
@@ -606,6 +607,14 @@ fun PlayerSheet(
                                 .size(with(density) { screenW.toDp() }, with(density) { (controlsBottom - controlsTop).toDp() }),
                         )
                     }
+                }
+                val debugShown by remember { derivedStateOf { state.progress.value > 0.99f && panel.panel == NowPlayingPanel.None } }
+                if (com.mrgnstr.harmony.core.debug.DebugOptions.enabled && debugShown) {
+                    DebugOverlay(
+                        Modifier
+                            .offset { IntOffset(0, fullArtY.roundToInt()) }
+                            .size(with(density) { fullArt.toDp() }),
+                    )
                 }
             }
         }

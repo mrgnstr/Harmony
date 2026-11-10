@@ -18,7 +18,8 @@ import kotlinx.coroutines.withContext
  * What to build for the full-screen player's cover surroundings, all in screen pixels.
  * [aboveCoverPx] / [belowCoverPx] are the free space above and below the square cover.
  * [fadePx] is how far into the cover the blurred strip reaches (its alpha fades in over that distance).
- * [slope] is the blur growth: a disc radius of slope * distance, i.e. a gaussian sigma of half that.
+ * The blur itself is the live one's (the Live and Far constants in CoverExtension.kt, at this [density]); the flags are the debug
+ * switches, which the strips follow so the two paths can be compared layer by layer.
  */
 data class CoverStripSpec(
     val songId: Long,
@@ -27,9 +28,12 @@ data class CoverStripSpec(
     val aboveCoverPx: Int,
     val belowCoverPx: Int,
     val fadePx: Int,
-    val topSigmaPx: Float,
-    val bottomSigmaPx: Float,
-    val slope: Float,
+    val density: Float,
+    val shader: Boolean = true,
+    val smoothing: Boolean = true,
+    val far: Boolean = true,
+    val curveAbove: Boolean = true,
+    val curveBelow: Boolean = true,
 )
 
 /**
@@ -41,11 +45,12 @@ class CoverStrips(val top: Bitmap?, val bottom: Bitmap?)
 /**
  * The blur around the full-screen cover, computed once per cover instead of every frame.
  *
- * Each strip is the cover's outermost pixel row stretched away from the cover and blurred with a radius that grows
- * linearly with distance. Every row of the stretched part is identical, so the blur there is purely horizontal and
- * each output row is just the edge row blurred by its own sigma. The few rows inside the cover (the fade zone, plus
- * padding so the blur kernel sees real picture) are blurred normally. Built at low resolution on the CPU, so it works
- * on every API level and costs nothing per frame afterwards.
+ * Each strip is the cover's outermost pixel row stretched away from the cover, drawn the way the live blur draws it: the shader
+ * layer (a gaussian of the live pass's combined sigma, which grows with distance) with the far layer (one wide sideways
+ * gaussian of the edge row) mixed over it by the live alpha ramp, which is curved towards the sides. Every row of the stretched
+ * part is identical, so the blur there is purely horizontal and each output row is just the edge row blurred by its own sigma.
+ * The few rows inside the cover (the fade zone, plus padding so the blur kernel sees real picture) are blurred normally.
+ * Built at low resolution on the CPU, so it works on every API level and costs nothing per frame afterwards.
  */
 @Singleton
 class CoverStripCache @Inject constructor(
@@ -55,7 +60,7 @@ class CoverStripCache @Inject constructor(
 
     suspend fun get(spec: CoverStripSpec): CoverStrips? {
         val key = with(spec) {
-            "${ArtworkKey(songId, albumId).cacheKey}|$widthPx|$aboveCoverPx|$belowCoverPx|$fadePx|$topSigmaPx|$bottomSigmaPx|$slope"
+            "${ArtworkKey(songId, albumId).cacheKey}|$widthPx|$aboveCoverPx|$belowCoverPx|$fadePx|$density|$shader|$smoothing|$far|$curveAbove|$curveBelow"
         }
         cache.get(key)?.let { return it }
         return withContext(Dispatchers.Default) {
@@ -81,14 +86,15 @@ class CoverStripCache @Inject constructor(
             val square = Bitmap.createScaledBitmap(bitmap, w, h, true)
             val cover = IntArray(w * h).also { square.getPixels(it, 0, w, 0, 0, w, h) }
             return CoverStrips(
-                top = buildStrip(cover, w, h, true, spec.aboveCoverPx, spec.fadePx, spec.topSigmaPx, spec.slope, scale),
-                bottom = buildStrip(cover, w, h, false, spec.belowCoverPx, spec.fadePx, spec.bottomSigmaPx, spec.slope, scale),
+                top = buildStrip(cover, w, h, true, spec.aboveCoverPx, spec, scale),
+                bottom = buildStrip(cover, w, h, false, spec.belowCoverPx, spec, scale),
             )
         }
 
         /**
          * [flip] = false: the strip hangs below the cover's bottom edge. true: above its top edge (built mirrored, then flipped back).
          * The returned bitmap's rows run from the screen's far edge towards the cover, or the reverse, as drawn.
+         * Sigmas and distances are in screen px until multiplied by [scale] (the working resolution over the screen's).
          */
         private fun buildStrip(
             cover: IntArray,
@@ -96,14 +102,32 @@ class CoverStripCache @Inject constructor(
             h: Int,
             flip: Boolean,
             spacePx: Int,
-            fadePx: Int,
-            sigma0Px: Float,
-            slope: Float,
+            spec: CoverStripSpec,
             scale: Float,
         ): Bitmap? {
             if (spacePx < 1) return null
+            val fadePx = spec.fadePx
+            val density = spec.density
+            val dist = spacePx.toFloat()
+
+            // The live blur's numbers for this side (see LiveShaderExtension / VariableEdgeBlur).
+            val startR = LiveStartRadius.value * density
+            val maxR = maxOf(LiveBlurSlope * dist, startR)
+            val preSigma = if (spec.smoothing) maxOf(LivePreBlur.value * density, 0.5f * LiveBlurDownscale) else 0f
+            val postSigma = if (spec.smoothing) GrainSmoothing * LiveBlurDownscale else 0f
+            // Gaussians add in quadrature; a disc of radius R is a gaussian of sigma R / 2. With the shader off the live blur is none.
+            fun sigmaAt(d: Float): Float {
+                if (!spec.shader) return 0f
+                val r = startR + (maxR - startR) * (d / dist).coerceIn(0f, 1f).let { Math.pow(it.toDouble(), RadiusCurve.toDouble()).toFloat() }
+                return sqrt(preSigma * preSigma + postSigma * postSigma + r * r / 4f)
+            }
+            val floorSigma = sigmaAt(0f)
+            val farSigma = if (spec.far) minOf(FarBlur.value * density, FarBlurPerDistance * dist) else 0f
+            val curve = if (if (flip) spec.curveAbove else spec.curveBelow) FarCurve else 0f
+            val ramp = if (flip) FarRampAbove else FarRampBelow
+
             val fadeRows = ceil(fadePx * scale).toInt().coerceIn(1, h / 3)
-            val padRows = ceil(3f * sigma0Px * scale).toInt().coerceIn(0, h - fadeRows)
+            val padRows = ceil(3f * floorSigma * scale).toInt().coerceIn(0, h - fadeRows)
             val belowRows = ceil(spacePx * scale).toInt().coerceAtLeast(1)
             val coverRows = fadeRows + padRows
             val rows = coverRows + belowRows
@@ -118,19 +142,26 @@ class CoverStripCache @Inject constructor(
             for (r in coverRows until rows) System.arraycopy(scene, edgeRow, scene, r * w, w)
 
             val tmp = IntArray(maxOf(w, rows))
-            // The base blur, same everywhere.
-            val s0 = sigma0Px * scale
+            // The far layer: the raw edge row, blurred sideways once (every stretched row is the same).
+            val far = if (farSigma > 0f) IntArray(w).also {
+                System.arraycopy(scene, edgeRow, it, 0, w)
+                Gaussian.line(it, 0, 1, w, farSigma * scale, tmp)
+            } else null
+
+            // The shader layer: the blur every row has (the floor, in both directions) ...
+            val s0 = floorSigma * scale
             if (s0 > 0.3f) {
                 for (r in 0 until rows) Gaussian.line(scene, r * w, 1, w, s0, tmp)
                 for (c in 0 until w) Gaussian.line(scene, c, w, rows, s0, tmp)
             }
-            // Growing blur below the edge: row i is at distance (i + 0.5) / scale px, disc radius slope * that, sigma half
-            // of it; in low-resolution pixels the scale cancels.
+            // ... and, below the edge, what its radius adds on top of the floor, sideways: row i is at distance (i + 0.5) / scale px.
             for (i in 0 until belowRows) {
-                Gaussian.line(scene, (coverRows + i) * w, 1, w, slope * (i + 0.5f) / 2f, tmp)
+                val d = (i + 0.5f) / scale
+                val extra = sigmaAt(d).let { sqrt(maxOf(it * it - floorSigma * floorSigma, 0f)) }
+                Gaussian.line(scene, (coverRows + i) * w, 1, w, extra * scale, tmp)
             }
 
-            // Output: drop the padding rows; fade the cover rows in.
+            // Output: drop the padding rows; the far layer over the shader layer by its alpha; fade the cover rows in.
             val outRows = fadeRows + belowRows
             val out = IntArray(w * outRows)
             for (j in 0 until outRows) {
@@ -138,7 +169,24 @@ class CoverStripCache @Inject constructor(
                 val dstRow = if (flip) outRows - 1 - j else j
                 val srcBase = (padRows + j) * w
                 val dstBase = dstRow * w
-                for (x in 0 until w) out[dstBase + x] = (alpha shl 24) or (scene[srcBase + x] and 0xFFFFFF)
+                // Below the cover's edge, how far the far layer is in: 1 - (1 - te)^ramp, te stretched towards the sides by the curve.
+                val t = if (j < fadeRows) 0f else (((j - fadeRows) + 0.5f) / scale / dist).coerceIn(0f, 1f)
+                for (x in 0 until w) {
+                    var px = scene[srcBase + x]
+                    if (far != null && t > 0f) {
+                        val sx = 2f * (x + 0.5f) / w - 1f
+                        val te = minOf(t * (1f + curve * sx * sx), 1f)
+                        val a = 1f - Math.pow((1f - te).toDouble(), ramp.toDouble()).toFloat()
+                        val f = far[x]
+                        fun mix(shift: Int): Int {
+                            val c0 = (px shr shift) and 0xFF
+                            val c1 = (f shr shift) and 0xFF
+                            return (c0 + (c1 - c0) * a).roundToInt().coerceIn(0, 255)
+                        }
+                        px = (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+                    }
+                    out[dstBase + x] = (alpha shl 24) or (px and 0xFFFFFF)
+                }
             }
             return Bitmap.createBitmap(out, w, outRows, Bitmap.Config.ARGB_8888)
         }
