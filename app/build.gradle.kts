@@ -22,6 +22,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // CI restores the shared debug keystore to a path it names here, so the signing key never depends on where the Android Gradle plugin
+        // looks for its default (the APK would silently be signed with a freshly generated key). Same alias and passwords as the default.
+        System.getenv("HARMONY_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }?.let { path -> getByName("debug") { storeFile = file(path) } }
+    }
+
     buildTypes {
         debug {
             buildConfigField("boolean", "DEBUG_OPTIONS", "true")

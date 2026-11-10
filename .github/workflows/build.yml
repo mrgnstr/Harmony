@@ -36,6 +36,9 @@ jobs:
           if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
             mkdir -p ~/.android
             echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            # Named explicitly for the build (see signingConfigs in app/build.gradle.kts), not left to the plugin's default lookup.
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+            echo "HARMONY_DEBUG_KEYSTORE=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
           else
             echo "::warning::DEBUG_KEYSTORE_BASE64 not set; signing with a throwaway debug key"
           fi
@@ -46,6 +49,12 @@ jobs:
 
       - name: Build release APK
         run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:assembleRelease
+
+      # So a mismatch with the key on the phones shows up here, in the log, rather than as an install failure later.
+      - name: Signing certificate
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          "$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -E "DN|SHA-256"
 
       - uses: actions/upload-artifact@v4
         with:
