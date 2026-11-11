@@ -73,6 +73,27 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setTabBarSide(side: TabBarSide) { context.settingsDataStore.edit { it[tabBarSideKey] = side.name } }
 
+    private val nowPlayingAlwaysDarkKey = booleanPreferencesKey("now_playing_always_dark")
+
+    /** Now Playing keeps light controls and a dimmed bottom even on a bright cover. Off by default. */
+    val nowPlayingAlwaysDark: Flow<Boolean> = context.settingsDataStore.data.map { it[nowPlayingAlwaysDarkKey] ?: false }
+
+    suspend fun setNowPlayingAlwaysDark(on: Boolean) { context.settingsDataStore.edit { it[nowPlayingAlwaysDarkKey] = on } }
+
+    private val collapseBarsKey = booleanPreferencesKey("collapse_bars_on_scroll")
+
+    /** The tab bar and mini player minimize while pages scroll down. On by default. */
+    val collapseBarsOnScroll: Flow<Boolean> = context.settingsDataStore.data.map { it[collapseBarsKey] ?: true }
+
+    suspend fun setCollapseBarsOnScroll(on: Boolean) { context.settingsDataStore.edit { it[collapseBarsKey] = on } }
+
+    private val showAudioInfoKey = booleanPreferencesKey("show_audio_info")
+
+    /** The codec / quality pill above the seek bar in full-screen Now Playing. On by default. */
+    val showAudioInfo: Flow<Boolean> = context.settingsDataStore.data.map { it[showAudioInfoKey] ?: true }
+
+    suspend fun setShowAudioInfo(on: Boolean) { context.settingsDataStore.edit { it[showAudioInfoKey] = on } }
+
     private val lyricsPriorityKey = stringPreferencesKey("lyrics_priority")
 
     /** Lyrics files beside a song or the lyrics in its tags first (files by default: they carry word timing and voices). */

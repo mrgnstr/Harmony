@@ -273,9 +273,11 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     val minimize = rememberBarMinimize()
     // Only with a mini player: without one the bar stays whole (and goes back to whole when the last song is cleared).
     // (Nor in wide layouts: the bar stands on a side there and takes no room from the content to give back.)
-    LaunchedEffect(hasMedia, vertical) {
-        minimize.enabled = hasMedia && !vertical
-        if (!hasMedia || vertical) minimize.expand()
+    // The "Collapse Bars on Scroll" setting turns it off everywhere: scrolling, the Search fold and the throw-down dig-in all go through `enabled`.
+    val collapseSetting by player.collapseBarsOnScroll.collectAsStateWithLifecycle()
+    LaunchedEffect(hasMedia, vertical, collapseSetting) {
+        minimize.enabled = hasMedia && !vertical && collapseSetting
+        if (!minimize.enabled) minimize.expand()
     }
     val barMinimize = remember { Animatable(0f) }
     val minimized = minimize.minimized && nav.current != Tab.Search

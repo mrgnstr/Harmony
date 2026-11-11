@@ -55,8 +55,9 @@ private const val BrightTop = 0.55f
  * - Any other gets light tints of the hue, with black under them in proportion to how bright the cover is, so even a mid-tone
  *   blur is dark enough for them.
  * A cover whose most common colour is grey, black or white keeps plain white (or plain black on a bright one).
+ * [alwaysDark] (the "Always dark Now Playing" setting) takes the second branch for every cover: light controls, dimmed bottom.
  */
-fun coverColorsOf(dominant: Int?, bottomLuminance: Float, topLuminance: Float = 0f): CoverColors {
+fun coverColorsOf(dominant: Int?, bottomLuminance: Float, topLuminance: Float = 0f, alwaysDark: Boolean = false): CoverColors {
     val base = dominant?.let { Hct.fromInt(it) }
     // A faint cast fades in from nothing instead of jumping to a visible tint (see CoverColour.tintFade): every tint is scaled by it.
     val fade = CoverColour.tintFade(base?.chroma ?: 0.0)
@@ -64,7 +65,7 @@ fun coverColorsOf(dominant: Int?, bottomLuminance: Float, topLuminance: Float = 
     val chroma = (base?.chroma ?: 0.0).coerceIn(20.0, 48.0)
     fun tint(c: Double, tone: Double) = Color(Hct.from(hue, c * fade, tone).toInt())
     val lightTop = topLuminance > BrightTop
-    return if (bottomLuminance >= BrightCover) {
+    return if (bottomLuminance >= BrightCover && !alwaysDark) {
         CoverColors(
             accent = tint(chroma, 22.0), onAccent = tint(20.0, 96.0), text = tint(10.0, 10.0),
             textSoft = tint(24.0, 28.0).copy(alpha = 0.85f), tonal = tint(chroma, 30.0).copy(alpha = 0.18f), scrim = 0f, lightTop = lightTop,

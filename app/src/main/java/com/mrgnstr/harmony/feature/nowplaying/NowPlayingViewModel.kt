@@ -24,6 +24,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -113,16 +114,35 @@ class NowPlayingViewModel @Inject constructor(
     /** The cover heavily blurred, small: the lyrics' background where the live blur is off. */
     suspend fun diffusedCover(songId: Long, albumId: Long) = diffusedArt.get(songId, albumId)
 
-    /** The controls' colours, from the cover's palette; re-resolved when the album changes, not on every song within one album. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    val coverColors: StateFlow<CoverColors> = player.state
+    private val coverColorPair: Flow<Pair<CoverColors, CoverColors>> = player.state
         .map { (it.songId ?: 0L) to it.albumId }
         .distinctUntilChanged { a, b -> a.second == b.second && a.second > 0 }
         .mapLatest { (songId, albumId) ->
-            if (songId == 0L) DefaultCoverColors
-            else colorStore.coverSample(songId, albumId)?.let { coverColorsOf(it.dominant, it.bottomLuminance, it.topLuminance) } ?: DefaultCoverColors
+            val sample = if (songId == 0L) null else colorStore.coverSample(songId, albumId)
+            if (sample == null) DefaultCoverColors to DefaultCoverColors
+            else coverColorsOf(sample.dominant, sample.bottomLuminance, sample.topLuminance) to
+                coverColorsOf(sample.dominant, sample.bottomLuminance, sample.topLuminance, alwaysDark = true)
         }
+
+    /** The controls' colours, from the cover's palette; re-resolved when the album changes, not on every song within one album. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val coverColors: StateFlow<CoverColors> = coverColorPair.map { it.first }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultCoverColors)
+
+    /** The same, for the "always dark" mode (used when the setting is on). */
+    val darkCoverColors: StateFlow<CoverColors> = coverColorPair.map { it.second }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultCoverColors)
+
+    val collapseBarsOnScroll: StateFlow<Boolean> = settings.collapseBarsOnScroll
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val showAudioInfo: StateFlow<Boolean> = settings.showAudioInfo
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val alwaysDark: StateFlow<Boolean> = settings.nowPlayingAlwaysDark
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
 
     /** The playing song's artist credit split into artists (a collaboration names several); the artist link asks which when there are. */
     val artists: StateFlow<List<String>> = combine(player.state.map { it.artist }.distinctUntilChanged(), libraryRepository.artistIndex) { credit, index ->
@@ -136,6 +156,10 @@ class NowPlayingViewModel @Inject constructor(
 
     /** The pre-blurred strips around the cover (where the live shader is off); computed off the main thread and cached. */
     suspend fun coverStrips(spec: CoverStripSpec): CoverStrips? = stripCache.get(spec)
+
+    /** What is already built (no work, main thread): lets the screen start with the blur in place. */
+    fun coverStripsIfReady(spec: CoverStripSpec): CoverStrips? = stripCache.peek(spec)
+    fun diffusedCoverIfReady(songId: Long, albumId: Long) = diffusedArt.peek(songId, albumId)
 
     /** The mini player was swiped away: stops and empties the queue. */
     fun clearAll() = player.clearAll()

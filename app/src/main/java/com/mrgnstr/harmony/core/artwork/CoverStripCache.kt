@@ -56,12 +56,16 @@ class CoverStrips(val top: Bitmap?, val bottom: Bitmap?)
 class CoverStripCache @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    private val cache = LruCache<String, CoverStrips>(4)
+    private val cache = LruCache<String, CoverStrips>(8)
+
+    private fun keyOf(spec: CoverStripSpec) = with(spec) {
+        "${ArtworkKey(songId, albumId).cacheKey}|$widthPx|$aboveCoverPx|$belowCoverPx|$fadePx|$density|$shader|$smoothing|$far|$curveAbove|$curveBelow"
+    }
+
+    fun peek(spec: CoverStripSpec): CoverStrips? = cache.get(keyOf(spec))
 
     suspend fun get(spec: CoverStripSpec): CoverStrips? {
-        val key = with(spec) {
-            "${ArtworkKey(songId, albumId).cacheKey}|$widthPx|$aboveCoverPx|$belowCoverPx|$fadePx|$density|$shader|$smoothing|$far|$curveAbove|$curveBelow"
-        }
+        val key = keyOf(spec)
         cache.get(key)?.let { return it }
         return withContext(Dispatchers.Default) {
             val decoded = ArtworkDecoder.decode(context, spec.songId, spec.albumId, min(spec.widthPx, MAX_WIDTH))

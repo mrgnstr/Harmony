@@ -102,6 +102,12 @@ import com.mrgnstr.harmony.core.playback.RepeatMode
 
 /** The controls' own height, title row to the shuffle/repeat row (what is between them is spread evenly); the cover is centred above it. */
 internal val FullControlsHeight = 360.dp
+/** The row of the codec pill above the seek bar (the pill and the gap under it): the controls are this much shorter without the pill. */
+private val AudioInfoRowHeight = 30.dp
+
+/** The controls' height; with the audio info off the row is gone, and the title, cover and everything above move down to fill it. */
+internal fun fullControlsHeight(showAudioInfo: Boolean) = if (showAudioInfo) FullControlsHeight else FullControlsHeight - AudioInfoRowHeight
+
 /** Space under the controls, above the navigation bar. */
 internal val FullControlsBottomGap = 24.dp
 
@@ -137,10 +143,18 @@ internal fun FullPlayerControls(
 
         Column(hide) {
             val format by vm.format.collectAsStateWithLifecycle()
-            Box(Modifier.fillMaxWidth().padding(bottom = 4.dp), contentAlignment = Alignment.Center) {
-                format?.let { FormatPill(it, panel) }
+            val showAudioInfo by vm.showAudioInfo.collectAsStateWithLifecycle()
+            val hasLyricsOptions = lyrics?.hasTranslations == true || lyrics?.hasPronunciations == true
+            // Without the pill the row has no height, except as far as a lyrics panel needs it for its translation button.
+            val rowModifier = if (showAudioInfo) Modifier.padding(bottom = 4.dp) else Modifier.layout { m, c ->
+                val p = m.measure(c)
+                val h = if (hasLyricsOptions) (p.height * panel.q()).roundToInt() else 0
+                layout(p.width, h) { p.place(0, 0) }
+            }
+            Box(Modifier.fillMaxWidth().then(rowModifier), contentAlignment = Alignment.Center) {
+                if (showAudioInfo) format?.let { FormatPill(it, panel) }
                 // Translations and pronunciations: only over lyrics that have them.
-                if (lyrics?.hasTranslations == true || lyrics?.hasPronunciations == true) {
+                if (hasLyricsOptions) {
                     LyricsOptions(
                         lyrics?.hasTranslations == true, lyrics?.hasPronunciations == true, panel,
                         Modifier

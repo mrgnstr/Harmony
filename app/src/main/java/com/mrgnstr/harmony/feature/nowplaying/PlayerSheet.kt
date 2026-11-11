@@ -59,6 +59,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
@@ -181,6 +182,12 @@ private class MorphingPillShape(private val miniH: Float, private val screenH: F
  * read in graphicsLayer lambdas, so a drag redraws but never recomposes or relayouts.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** How far up into the cover the darkening under it begins, as a share of the cover's height. */
+private const val ScrimIntoCover = 0.15f
+
+/** How many songs ahead of the playing one get their cover blur built in advance. */
+private const val PrewarmAhead = 3
+
 @Composable
 fun PlayerSheet(
     state: PlayerSheetState,
@@ -208,7 +215,9 @@ fun PlayerSheet(
         if (entrance.value > 0f) entrance.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
     }
     val panel = rememberPanelState()
-    val vmColors = viewModel.coverColors.collectAsStateWithLifecycle().value
+    val showAudioInfo = viewModel.showAudioInfo.collectAsStateWithLifecycle().value
+    val alwaysDark = viewModel.alwaysDark.collectAsStateWithLifecycle().value
+    val vmColors = (if (alwaysDark) viewModel.darkCoverColors else viewModel.coverColors).collectAsStateWithLifecycle().value
     // Over the darkened, blurred lyrics background the dark controls of a bright cover would not be seen: they turn light.
     val coverColors = animateCoverColors(if (panel.panel != NowPlayingPanel.None && vmColors.scrim < 0.01f) DefaultCoverColors else vmColors)
     val density = LocalDensity.current
@@ -265,7 +274,7 @@ fun PlayerSheet(
         // The cover is edge to edge and square. On a tall screen it sits centred between the status bar and the controls with blur
         // above and below; on a short one it is pinned to the top, with no blur above, and the controls share what is left.
         val fullArt = screenW
-        val controlsNatural = with(density) { FullControlsHeight.toPx() }
+        val controlsNatural = with(density) { fullControlsHeight(showAudioInfo).toPx() }
         val naturalControlsTop = screenH - navBottom - with(density) { FullControlsBottomGap.toPx() } - controlsNatural
         val compact = naturalControlsTop - fullArt < statusTop
         val fullArtY = if (compact) 0f else (statusTop + (naturalControlsTop - statusTop - fullArt) / 2f).roundToInt().toFloat()
@@ -280,6 +289,22 @@ fun PlayerSheet(
         // The lyrics view starts this much above that, under the header, so the fade at its top has room above the lines.
         val listOverlap = with(density) { LyricsTopOverlap.toPx() }
         val liveBlur = liveCoverBlur()
+        // The blur bitmaps (where the live blur is off) are built for this song and the ones about to play, whether or not Now Playing
+        // is open, so a song change or opening the player finds them ready.
+        val shaderBlur = com.mrgnstr.harmony.core.designsystem.realTimeBlur()
+        val specOf = com.mrgnstr.harmony.core.artwork.rememberCoverStripSpecFactory()
+        val upcoming = viewModel.queue.collectAsStateWithLifecycle().value.upcoming.take(PrewarmAhead).map { it.songId to it.albumId }
+        if (!shaderBlur || !liveBlur) {
+            val wPx = screenW.roundToInt(); val hPx = screenH.roundToInt()
+            val topPx = fullArtY.roundToInt(); val bottomPx = (fullArtY + fullArt).roundToInt()
+            LaunchedEffect(songId, snap.albumId, upcoming, specOf, wPx, hPx, topPx, bottomPx, shaderBlur, liveBlur) {
+                for ((id, album) in listOf(songId to snap.albumId) + upcoming) {
+                    if (id == 0L) continue
+                    if (!shaderBlur) viewModel.coverStrips(specOf(id, album, wPx, hPx, topPx, bottomPx))
+                    if (!liveBlur) viewModel.diffusedCover(id, album)
+                }
+            }
+        }
         val cover = rememberCoverTransition(songId, snap.albumId, fullArt.roundToInt())
         val showFull by remember { derivedStateOf { state.progress.value > 0.01f } }
         val showMini by remember { derivedStateOf { state.progress.value < 0.99f } }
@@ -495,7 +520,8 @@ fun PlayerSheet(
                 // Darkening under the cover (never on it) keeps light controls readable on a mid-tone blur: how much depends on the
                 // cover (none on a bright one, whose controls are dark). Eased out, so it is already strong where the title sits.
                 if (coverColors.scrim > 0.01f && com.mrgnstr.harmony.core.debug.DebugOptions.scrim.on) {
-                    val from = ((fullArtY + fullArt) / screenH).coerceIn(0f, 1f)
+                    // The curve starts inside the cover's bottom edge (by [ScrimIntoCover] of the cover's height), so it is already strong at the title.
+                    val from = ((fullArtY + fullArt * (1f - ScrimIntoCover)) / screenH).coerceIn(0f, 1f)
                     val a = coverColors.scrim
                     Box(
                         Modifier.fillMaxSize().background(
@@ -540,7 +566,7 @@ fun PlayerSheet(
                     if (showFull) {
                         CoverExtension(
                             songId = songId, albumId = snap.albumId, cover = cover,
-                            coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips,
+                            coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips, ready = viewModel::coverStripsIfReady,
                         )
                         sceneScrim()
                     }
@@ -548,7 +574,7 @@ fun PlayerSheet(
                 if (panel.visible) {
                     if (!liveBlur) {
                         // No live blur: the small pre-blurred cover, stretched over everything.
-                        val diffused by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, songId, snap.albumId) {
+                        val diffused by produceState(viewModel.diffusedCoverIfReady(songId, snap.albumId)?.asImageBitmap(), songId, snap.albumId) {
                             value = viewModel.diffusedCover(songId, snap.albumId)?.asImageBitmap()
                         }
                         diffused?.let { Image(it, null, Modifier.fillMaxSize().graphicsLayer { alpha = panel.q() }, contentScale = ContentScale.Crop) }

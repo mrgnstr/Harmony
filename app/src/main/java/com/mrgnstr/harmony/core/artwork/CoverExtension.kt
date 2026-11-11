@@ -209,6 +209,7 @@ fun CoverExtension(
     load: suspend (CoverStripSpec) -> CoverStrips?,
     modifier: Modifier = Modifier,
     slopeOverride: Float? = null,
+    ready: (CoverStripSpec) -> CoverStrips? = { null },
 ) {
     val density = LocalDensity.current
     val liveShader = realTimeBlur()
@@ -222,7 +223,7 @@ fun CoverExtension(
                 LiveShaderExtension(cover, coverTopPx, coverSizePx, coverBottom, w, h, slopeOverride ?: LiveBlurSlope)
             }
         } else {
-            PrecomputedExtension(songId, albumId, coverTopPx, coverBottom, w, h, load)
+            PrecomputedExtension(songId, albumId, coverTopPx, coverBottom, w, h, load, ready)
         }
     }
 }
@@ -286,6 +287,31 @@ private fun LiveShaderExtension(
     }
 }
 
+/**
+ * The spec [PrecomputedExtension] asks for, for a screen of [widthPx] x [heightPx] with the cover's top and bottom edges at
+ * [topPx] / [bottomPx]. The player builds the same one for the songs coming up, so their bitmaps are in the cache beforehand.
+ */
+@Composable
+fun rememberCoverStripSpecFactory(): (Long, Long, Int, Int, Int, Int) -> CoverStripSpec {
+    val density = LocalDensity.current
+    val fadePx = with(density) { FadeIntoCover.roundToPx() }
+    val shader = DebugOptions.shader.on
+    val smoothing = DebugOptions.smoothing.on
+    val far = DebugOptions.far.on
+    val curveAbove = DebugOptions.curveAbove.on
+    val curveBelow = DebugOptions.curveBelow.on
+    return remember(density.density, fadePx, shader, smoothing, far, curveAbove, curveBelow) {
+        { songId, albumId, width, height, top, bottom ->
+            CoverStripSpec(
+                songId, albumId, width,
+                aboveCoverPx = top.coerceAtLeast(0), belowCoverPx = (height - bottom).coerceAtLeast(0),
+                fadePx = fadePx, density = density.density,
+                shader = shader, smoothing = smoothing, far = far, curveAbove = curveAbove, curveBelow = curveBelow,
+            )
+        }
+    }
+}
+
 /** The two pre-blurred bitmaps built by [load]; used where the live shader isn't available. */
 @Composable
 private fun PrecomputedExtension(
@@ -296,6 +322,7 @@ private fun PrecomputedExtension(
     w: Float,
     h: Float,
     load: suspend (CoverStripSpec) -> CoverStrips?,
+    ready: (CoverStripSpec) -> CoverStrips?,
 ) {
     val density = LocalDensity.current
     val top = coverTopPx.roundToInt()
@@ -303,23 +330,13 @@ private fun PrecomputedExtension(
     val width = w.roundToInt()
     val height = h.roundToInt()
     val fadePx = with(density) { FadeIntoCover.roundToPx() }
-    // The debug switches apply here too, so the two paths can be compared layer by layer.
-    val shader = DebugOptions.shader.on
-    val smoothing = DebugOptions.smoothing.on
-    val far = DebugOptions.far.on
-    val curveAbove = DebugOptions.curveAbove.on
-    val curveBelow = DebugOptions.curveBelow.on
-    val spec = remember(songId, albumId, width, height, top, bottom, density.density, shader, smoothing, far, curveAbove, curveBelow) {
-        CoverStripSpec(
-            songId, albumId, width,
-            aboveCoverPx = top.coerceAtLeast(0), belowCoverPx = (height - bottom).coerceAtLeast(0),
-            fadePx = fadePx, density = density.density,
-            shader = shader, smoothing = smoothing, far = far, curveAbove = curveAbove, curveBelow = curveBelow,
-        )
-    }
-    var strips by remember { mutableStateOf<CoverStrips?>(null) }
+    // The debug switches apply here too (inside the factory), so the two paths can be compared layer by layer.
+    val specOf = rememberCoverStripSpecFactory()
+    val spec = remember(specOf, songId, albumId, width, height, top, bottom) { specOf(songId, albumId, width, height, top, bottom) }
+    // Starts with the bitmaps if they were built in advance, so there is nothing to fade in.
+    var strips by remember { mutableStateOf(ready(spec)) }
     LaunchedEffect(spec) {
-        strips = load(spec)
+        strips = ready(spec) ?: load(spec)
     }
 
     // The old strips stay until the new ones are ready, then fade across, so a song change never shows a gap or a mismatch.

@@ -19,6 +19,8 @@ class DiffusedArtCache @Inject constructor(
 ) {
     private val cache = LruCache<String, Bitmap>(8)
 
+    fun peek(songId: Long, albumId: Long): Bitmap? = cache.get(ArtworkKey(songId, albumId).cacheKey)
+
     suspend fun get(songId: Long, albumId: Long): Bitmap? {
         val key = ArtworkKey(songId, albumId).cacheKey
         cache.get(key)?.let { return it }

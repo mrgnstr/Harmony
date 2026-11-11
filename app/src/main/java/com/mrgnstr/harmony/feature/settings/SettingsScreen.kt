@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -52,6 +53,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,6 +99,8 @@ import com.mrgnstr.harmony.core.model.LyricsPriority
 import com.mrgnstr.harmony.core.model.MissingFileItem
 import com.mrgnstr.harmony.core.model.MusicFolder
 import com.mrgnstr.harmony.core.model.ReplayGainMode
+import com.mrgnstr.harmony.core.mediastore.MediaStoreScanner
+import com.mrgnstr.harmony.core.model.LibraryFilters
 import com.mrgnstr.harmony.core.model.ScanStatusInfo
 import com.mrgnstr.harmony.core.model.ServerAccount
 import com.mrgnstr.harmony.core.model.ShareLink
@@ -116,7 +120,22 @@ class SettingsViewModel @Inject constructor(
     val settings: SettingsStore,
     val navidrome: NavidromeRepository,
     val downloads: OfflineDownloadManager,
+    private val scanner: MediaStoreScanner,
 ) : ViewModel() {
+    val libraryFilters: StateFlow<LibraryFilters> = settings.libraryFilters
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryFilters())
+    val collapseBars: StateFlow<Boolean> = settings.collapseBarsOnScroll
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    fun setCollapseBars(on: Boolean) { viewModelScope.launch { settings.setCollapseBarsOnScroll(on) } }
+    val showAudioInfo: StateFlow<Boolean> = settings.showAudioInfo
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    fun setShowAudioInfo(on: Boolean) { viewModelScope.launch { settings.setShowAudioInfo(on) } }
+    val alwaysDark: StateFlow<Boolean> = settings.nowPlayingAlwaysDark
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    fun setAlwaysDark(on: Boolean) { viewModelScope.launch { settings.setNowPlayingAlwaysDark(on) } }
+    fun setMinimumDuration(ms: Long) { viewModelScope.launch { settings.setMinimumDuration(ms) } }
+    fun setFolderExcluded(path: String, excluded: Boolean) { viewModelScope.launch { settings.setFolderExcluded(path, excluded) } }
+    suspend fun localMusicFolders(): List<String> = runCatching { scanner.musicFolders() }.getOrDefault(emptyList())
     val accounts: StateFlow<List<ServerAccount>> = navidrome.accounts
     val activeAccount: StateFlow<ServerAccount?> = navidrome.activeAccount
     val syncState: StateFlow<SyncState> = navidrome.syncState
@@ -209,6 +228,11 @@ fun SettingsRoute(
     val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     val scanStatus by viewModel.scanStatus.collectAsStateWithLifecycle()
     val musicFolders by viewModel.musicFolders.collectAsStateWithLifecycle()
+    val alwaysDark by viewModel.alwaysDark.collectAsStateWithLifecycle()
+    val collapseBars by viewModel.collapseBars.collectAsStateWithLifecycle()
+    val showAudioInfo by viewModel.showAudioInfo.collectAsStateWithLifecycle()
+    val libraryFilters by viewModel.libraryFilters.collectAsStateWithLifecycle()
+    var showLocalFoldersSheet by remember { mutableStateOf(false) }
 
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val glassBlur by viewModel.glassBlur.collectAsStateWithLifecycle()
@@ -373,6 +397,45 @@ fun SettingsRoute(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Local library filters (never touch Navidrome songs: LibrarySync only indexes serverId 0)
+        item(key = "local-library-heading") {
+            SectionHeading("Local Library")
+        }
+        item(key = "local-library-card") {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                Column(Modifier.padding(vertical = 8.dp)) {
+                    MediaRow(
+                        title = "Music Folders",
+                        subtitle = if (libraryFilters.excludedFolders.isEmpty()) "All folders on this device"
+                        else "${libraryFilters.excludedFolders.size} excluded",
+                        onClick = { showLocalFoldersSheet = true },
+                        trailing = { SymbolIcon(Symbols.Folder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 12.dp)) },
+                    )
+                    // Commit on release: every change re-scans MediaStore.
+                    var seconds by remember(libraryFilters.minimumDurationMs) {
+                        mutableFloatStateOf((libraryFilters.minimumDurationMs / 1000L).toFloat().coerceIn(0f, 300f))
+                    }
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        Text(
+                            "Minimum Song Length: " + if (seconds.roundToInt() == 0) "Off" else formatMinimumLength(seconds.roundToInt()),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = seconds,
+                            onValueChange = { seconds = it },
+                            onValueChangeFinished = { viewModel.setMinimumDuration(seconds.roundToInt() * 1000L) },
+                            valueRange = 0f..300f,
+                            steps = 59,
+                        )
                     }
                 }
             }
@@ -651,6 +714,24 @@ fun SettingsRoute(
                         onSelect = viewModel::setCoverBlur,
                         enabled = canBlur,
                     )
+                    SwitchSettingRow(
+                        title = "Collapse Bars on Scroll",
+                        subtitle = "The tab bar and mini player shrink while a page scrolls down",
+                        checked = collapseBars,
+                        onCheckedChange = viewModel::setCollapseBars,
+                    )
+                    SwitchSettingRow(
+                        title = "Audio Info in Now Playing",
+                        subtitle = "The codec and quality pill above the seek bar",
+                        checked = showAudioInfo,
+                        onCheckedChange = viewModel::setShowAudioInfo,
+                    )
+                    SwitchSettingRow(
+                        title = "Always Dark Now Playing",
+                        subtitle = "Always light controls and a dimmed bottom, even on bright covers",
+                        checked = alwaysDark,
+                        onCheckedChange = viewModel::setAlwaysDark,
+                    )
                     MediaRow(
                         title = "Accent Colour",
                         subtitle = if (accent == AccentColor.Wallpaper) {
@@ -789,6 +870,15 @@ fun SettingsRoute(
         ManageSharesSheet(
             navidrome = viewModel.navidrome,
             onDismiss = { showSharesSheet = false },
+        )
+    }
+
+    if (showLocalFoldersSheet) {
+        LocalFoldersSheet(
+            excluded = libraryFilters.excludedFolders,
+            loadFolders = viewModel::localMusicFolders,
+            onToggle = viewModel::setFolderExcluded,
+            onDismiss = { showLocalFoldersSheet = false },
         )
     }
 
@@ -1211,6 +1301,63 @@ private fun MissingFilesSheet(
                                 Text(item.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatMinimumLength(seconds: Int): String =
+    if (seconds < 60) "$seconds s" else "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')} min"
+
+/** Every folder MediaStore has music in (plus excluded ones that have since gone), each with a switch. */
+@Composable
+private fun LocalFoldersSheet(
+    excluded: Set<String>,
+    loadFolders: suspend () -> List<String>,
+    onToggle: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var found by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(Unit) { found = loadFolders() }
+    var query by remember { mutableStateOf("") }
+    val folders = found?.let { all ->
+        (all + excluded).distinct().sorted().filter { query.isBlank() || it.removePrefix("/storage/emulated/0/").contains(query.trim(), ignoreCase = true) }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Music Folders", style = MaterialTheme.typography.titleLargeEmphasized)
+            Text(
+                "Turn off folders to hide their songs from the local library. Files are never deleted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search folders") },
+                leadingIcon = { SymbolIcon(Symbols.Search, null) },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            when {
+                folders == null -> Text("Loading…", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                folders.isEmpty() -> Text(if (query.isBlank()) "No music folders found." else "No folders match.", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                    items(folders, key = { it }) { path ->
+                        val enabled = path !in excluded
+                        MediaRow(
+                            title = path.substringAfterLast('/'),
+                            subtitle = path.removePrefix("/storage/emulated/0/").removePrefix("/sdcard/"),
+                            onClick = { onToggle(path, enabled) },
+                            trailing = { Switch(checked = enabled, onCheckedChange = { onToggle(path, enabled) }, modifier = Modifier.padding(end = 12.dp)) },
+                        )
                     }
                 }
             }
