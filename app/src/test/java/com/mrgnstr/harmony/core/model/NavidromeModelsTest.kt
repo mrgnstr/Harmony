@@ -40,4 +40,34 @@ class NavidromeModelsTest {
         val loud = ReplayGainInfo(trackGainDb = 12.0, trackPeak = 0.8)
         assertEquals(1.25f, loud.computeGainFactor(ReplayGainMode.Track, isAlbumSource = false, preventClipping = true), 0.01f)
     }
+
+    @Test
+    fun serverUrlCandidatesTryHttpsFirstForPublicHosts() {
+        assertEquals(listOf("https://music.example.com", "http://music.example.com"), serverUrlCandidates("music.example.com"))
+        assertEquals(
+            listOf("https://music.example.com/navidrome", "http://music.example.com/navidrome"),
+            serverUrlCandidates("  music.example.com/navidrome/ "),
+        )
+    }
+
+    @Test
+    fun serverUrlCandidatesTryHttpFirstForLanHosts() {
+        assertEquals(listOf("http://192.168.1.10:4533", "https://192.168.1.10:4533"), serverUrlCandidates("192.168.1.10:4533"))
+        assertEquals("http://nas:4533", serverUrlCandidates("nas:4533").first())
+        assertEquals("http://localhost:4533", serverUrlCandidates("localhost:4533").first())
+        assertEquals("https://8.8.8.8:4533", serverUrlCandidates("8.8.8.8:4533").first())
+    }
+
+    @Test
+    fun serverUrlCandidatesRespectAnExplicitScheme() {
+        assertEquals(listOf("https://Music.Example.com"), serverUrlCandidates(" HTTPS://Music.Example.com/ "))
+        assertEquals(listOf("http://x:4533"), serverUrlCandidates("http://x:4533"))
+        assertEquals(emptyList<String>(), serverUrlCandidates("   "))
+    }
+
+    @Test
+    fun normalizeServerUrlLeavesSavedUrlsAlone() {
+        assertEquals("https://music.example.com", normalizeServerUrl("https://music.example.com/"))
+        assertEquals("http://192.168.1.10:4533", normalizeServerUrl("192.168.1.10:4533"))
+    }
 }

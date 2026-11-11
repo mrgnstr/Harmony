@@ -221,8 +221,9 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
     val app = hiltViewModel<AppViewModel>()
     NotificationPermissionEffect()
     val tier = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.LocalVisualTier.current)
-    // The entry lambdas below are remembered: read the factory through a state, or pages keep the old accent's schemes.
+    // The entry lambdas below are remembered: read the factory and the dark flag through states, or pages keep the old accent / theme mode.
     val liveSchemes = androidx.compose.runtime.rememberUpdatedState(schemes)
+    val liveDark = androidx.compose.runtime.rememberUpdatedState(dark)
     // The page a back uncovers comes into focus from a blur: part of the chrome blur setting.
     val backBlur = androidx.compose.runtime.rememberUpdatedState(com.mrgnstr.harmony.core.designsystem.blur.liveChromeBlur())
     val blur = rememberChromeBlurState()
@@ -393,7 +394,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                 val leavingBack = key !in nav.stackOf(key.tab).map { TabDestination(key.tab, it) } || nav.stackOf(key.tab).lastOrNull() == key.destination
                 BackEffects(leavingBack, backing = nav.lastWasBack || backGesture.value, blurred = backBlur.value,
                     ms = if (backGesture.value || nav.lastBackByGesture) GestureMs else BackMs) {
-                    CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, liveSchemes.value, dark, tier.value) { entry.Content() } }
+                    CompositionLocalProvider(LocalEntryKey provides key) { EntryTheme(key, liveSchemes.value, liveDark.value, tier.value) { entry.Content() } }
                 }
             }
         }

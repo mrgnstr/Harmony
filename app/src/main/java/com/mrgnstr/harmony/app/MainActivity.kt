@@ -55,7 +55,9 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { settings.tabBarSide.collect { tabBarSide = it } }
         lifecycleScope.launch { settings.accent.collect { accent = it } }
         setContent {
-            val dark = when (themeMode ?: ThemeMode.System) {
+            // Splash is held until loaded; never compose with a guessed mode (pages would capture it).
+            val mode = themeMode ?: return@setContent
+            val dark = when (mode) {
                 ThemeMode.System -> isSystemInDarkTheme()
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true

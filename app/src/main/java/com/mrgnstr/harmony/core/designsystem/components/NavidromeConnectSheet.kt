@@ -122,7 +122,7 @@ fun NavidromeConnectSheet(
             OutlinedTextField(
                 value = serverUrl,
                 onValueChange = { serverUrl = it; errorMessage = null },
-                label = { Text("Server URL (e.g. https://music.example.com or 192.168.1.50:4533)") },
+                label = { Text("Server address (music.example.com or 192.168.1.50:4533)") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(
@@ -206,7 +206,9 @@ fun NavidromeConnectSheet(
                                 errorMessage = null
                                 scope.launch {
                                     runCatching {
-                                        viewModel.repository.initiateQuickConnect(serverUrl, Build.MODEL ?: "Android", allowSelfSigned)
+                                        val resolved = viewModel.repository.resolveServerUrl(serverUrl, allowSelfSigned)
+                                        serverUrl = resolved // polling and the final login then use the scheme that worked
+                                        viewModel.repository.initiateQuickConnect(resolved, Build.MODEL ?: "Android", allowSelfSigned)
                                     }.onSuccess { quickConnect = it }
                                         .onFailure { errorMessage = it.message ?: "Quick Connect unavailable" }
                                 }

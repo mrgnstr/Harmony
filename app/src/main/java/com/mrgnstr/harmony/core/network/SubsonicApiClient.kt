@@ -128,7 +128,8 @@ class SubsonicApiClient @Inject constructor(
         if (resp.statusCode !in 200..299 && resp.body.isBlank()) {
             throw NavidromeApiException(resp.statusCode, "HTTP ${resp.statusCode} on $clean")
         }
-        val root = MiniJson.parseObject(resp.body)
+        val root = runCatching { MiniJson.parseObject(resp.body) }.getOrNull()
+            ?: throw NavidromeApiException(resp.statusCode, "The server did not answer like a Navidrome/Subsonic server (HTTP ${resp.statusCode})")
         val sub = root.obj("subsonic-response")
             ?: throw NavidromeApiException(resp.statusCode, "Invalid Subsonic response on $clean")
         if (sub.str("status") != "ok") {
@@ -141,6 +142,23 @@ class SubsonicApiClient @Inject constructor(
     }
 
     // --- System & Auth ---
+
+    /**
+     * Does a Subsonic server answer at [baseUrl]? Unauthenticated: any Subsonic JSON reply (an auth error included)
+     * proves the scheme and address are right. A redirect, a non-JSON body or a transport error means no.
+     */
+    suspend fun probe(baseUrl: String, allowSelfSignedTls: Boolean): Boolean {
+        val temp = ServerAccount(name = "probe", baseUrl = baseUrl, username = "", allowSelfSignedTls = allowSelfSignedTls)
+        return runCatching {
+            val resp = http.request(
+                account = temp,
+                url = "${temp.normalizedBaseUrl}/rest/ping?f=json&v=${SubsonicAuth.SUBSONIC_VERSION}&c=Harmony",
+                connectTimeoutMs = 4_000,
+                readTimeoutMs = 6_000,
+            )
+            resp.statusCode !in 300..399 && MiniJson.parseObject(resp.body).obj("subsonic-response") != null
+        }.getOrDefault(false)
+    }
 
     suspend fun ping(account: ServerAccount): SubsonicPingResult {
         val sub = call(account, "ping", usePost = false)

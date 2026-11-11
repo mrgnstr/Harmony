@@ -33,7 +33,7 @@ import com.mrgnstr.harmony.core.model.ShareLink
 import com.mrgnstr.harmony.core.model.SmartPlaylistCriteria
 import com.mrgnstr.harmony.core.model.Song
 import com.mrgnstr.harmony.core.model.SonicMatchItem
-import com.mrgnstr.harmony.core.model.normalizeServerUrl
+import com.mrgnstr.harmony.core.model.serverUrlCandidates
 import com.mrgnstr.harmony.core.network.MiniJson
 import com.mrgnstr.harmony.core.network.NavidromeHttpClient
 import com.mrgnstr.harmony.core.network.NavidromeNativeClient
@@ -183,8 +183,7 @@ class NavidromeRepository @Inject constructor(
         authMethod: AuthMethod = AuthMethod.Password,
         allowSelfSignedTls: Boolean = false,
     ): ServerAccount = withContext(Dispatchers.IO) {
-        val cleanUrl = normalizeServerUrl(baseUrl)
-        require(cleanUrl.isNotEmpty()) { "Server URL cannot be empty" }
+        val cleanUrl = resolveServerUrl(baseUrl, allowSelfSignedTls)
 
         var jwt: String? = null
         var salt = SubsonicAuth.generateSalt()
@@ -253,6 +252,21 @@ class NavidromeRepository @Inject constructor(
         scope.launch { syncNow(saved) }
         saved
     }
+
+    /**
+     * Turns what the user typed into a working base URL: tries https and http when no scheme was typed and returns the one
+     * that answers. Only an unauthenticated ping is repeated; credentials are sent once, to the chosen address.
+     */
+    suspend fun resolveServerUrl(raw: String, allowSelfSignedTls: Boolean): String = withContext(Dispatchers.IO) {
+        val candidates = serverUrlCandidates(raw)
+        require(candidates.isNotEmpty()) { "Server URL cannot be empty" }
+        if (candidates.size == 1) return@withContext candidates[0]
+        candidates.firstOrNull { subsonic.probe(it, allowSelfSignedTls) }
+            ?: throw IllegalStateException("Could not reach ${raw.trim().trimEnd('/')} over HTTPS or HTTP. Check the address and that the server is running.")
+    }
+
+    /** Safe on a cold start: the StateFlow is still its initial null until Room has emitted, so fall back to the DAO. */
+    suspend fun hasActiveAccount(): Boolean = activeAccount.value != null || navidromeDao.activeAccount() != null
 
     suspend fun initiateQuickConnect(baseUrl: String, deviceName: String, allowSelfSignedTls: Boolean): QuickConnectChallenge =
         nativeClient.initiateQuickConnect(baseUrl, deviceName, allowSelfSignedTls)

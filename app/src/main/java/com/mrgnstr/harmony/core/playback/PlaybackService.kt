@@ -80,7 +80,14 @@ class PlaybackService : MediaSessionService() {
                 )
             },
         )
+        // Streams: keep downloading well past the default 50 s (the current song finishes early, and only then does the next one
+        // start loading) and don't let the byte target cap hi-res files before the time target.
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(/* min */ 60_000, /* max */ 180_000, /* forPlayback */ 1_000, /* afterRebuffer */ 3_000)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
         val player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
             .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -90,13 +97,19 @@ class PlaybackService : MediaSessionService() {
                 /* handleAudioFocus = */ true,
             )
             .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(C.WAKE_MODE_LOCAL)
+            // NETWORK also holds a Wi-Fi lock: with the screen off, Wi-Fi power save delays the request for the next song.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        // Start loading the next queue item (10 s of it) as soon as the current one is buffered, not when it has ended.
+        player.preloadConfiguration = ExoPlayer.PreloadConfiguration(10_000_000L)
         // Tapping the notification (or lock-screen player) opens Now Playing.
         val open = PendingIntent.getActivity(
             this, 0,
-            // The launcher activity, found by package so core never names the app layer.
-            packageManager.getLaunchIntentForPackage(packageName)!!.putExtra(EXTRA_OPEN_PLAYER, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            // MainActivity by name (core never imports the app layer). Not the launcher intent: for a MAIN/LAUNCHER intent that matches
+            // the running task's root Android only brings the task forward and drops the extra, so Now Playing never opened.
+            Intent().setClassName(packageName, "com.mrgnstr.harmony.app.MainActivity")
+                .putExtra(EXTRA_OPEN_PLAYER, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         livePlayer = player
@@ -110,11 +123,24 @@ class PlaybackService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 applyReplayGain(player, mediaItem)
+                prewarmNextQuality(player)
                 val songId = mediaItem?.mediaId?.toLongOrNull() ?: return
                 if (player.isPlaying && songId < 0L) {
                     appScope.launch {
                         navidrome.reportScrobble(songId, System.currentTimeMillis(), submission = false, positionMs = 0L, state = "playing")
                     }
+                }
+            }
+
+            /**
+             * Swiping the notification away makes Media3 stop the player (IDLE, not playing). Take the service down with it so the
+             * notification stays gone instead of being re-posted by the next metadata or volume update; the queue is saved, and the
+             * app (or a media button) brings the service back and restores it.
+             */
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_IDLE && !player.playWhenReady && player.playerError == null && player.mediaItemCount > 0) {
+                    persister.flush()
+                    pauseAllPlayersAndStopSelf()
                 }
             }
 
@@ -149,7 +175,7 @@ class PlaybackService : MediaSessionService() {
 
         // Back to where playback stopped, paused. Saving only starts afterwards, so the empty player cannot overwrite the queue.
         scope.launch {
-            val saved = if (hasAudioPermission() || navidrome.activeAccount.value != null) runCatching { queueRestorer.load() }.getOrNull() else null
+            val saved = loadSavedQueue()
             // The user may have started something before the read finished (or resumption got there first): that wins.
             if (saved != null && !restoreHandled && player.mediaItemCount == 0) {
                 restoreHandled = true
@@ -160,6 +186,15 @@ class PlaybackService : MediaSessionService() {
             }
             persister.arm()
         }
+    }
+
+    /** The stream resolver asks TranscodePolicy (a format probe for some files) on the loader thread: do it for the next item ahead of time. */
+    private fun prewarmNextQuality(player: ExoPlayer) {
+        val next = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
+        val uri = player.getMediaItemAt(next).localConfiguration?.uri ?: return
+        val id = uri.getQueryParameter("id")
+        if (uri.scheme?.startsWith("http") != true || id == null) return
+        appScope.launch { runCatching { transcodePolicy.streamQuality(id) } }
     }
 
     private fun applyReplayGain(player: ExoPlayer, item: androidx.media3.common.MediaItem?) {
@@ -224,9 +259,10 @@ class PlaybackService : MediaSessionService() {
             }
             val result = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             scope.launch {
-                val saved = if (hasAudioPermission()) runCatching { queueRestorer.load() }.getOrNull() else null
+                val saved = loadSavedQueue()
                 if (saved == null) {
                     result.setException(UnsupportedOperationException("no saved queue"))
+                    if (isForPlayback) satisfyForegroundStart()
                 } else {
                     restoreHandled = true
                     applySaved(saved)
@@ -236,6 +272,34 @@ class PlaybackService : MediaSessionService() {
             }
             return result
         }
+    }
+
+    /** The saved queue, if this install can play anything at all: local audio permission or a Navidrome account (the DAO, not the cold StateFlow). */
+    private suspend fun loadSavedQueue(): SavedQueue? =
+        if (hasAudioPermission() || navidrome.hasActiveAccount()) runCatching { queueRestorer.load() }.getOrNull() else null
+
+    /**
+     * A media button cold-starts this service with startForegroundService; with nothing to resume the player stays idle and
+     * Media3 never calls startForeground, which is an ANR after 30 s. Honour the contract with a notification that is
+     * removed straight away, then stop.
+     */
+    private fun satisfyForegroundStart() {
+        if (session?.player?.mediaItemCount?.let { it > 0 } == true) return
+        runCatching {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(android.app.NotificationChannel(FALLBACK_CHANNEL, "Playback", android.app.NotificationManager.IMPORTANCE_MIN))
+            val notification = androidx.core.app.NotificationCompat.Builder(this, FALLBACK_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle("Harmony")
+                .setSilent(true)
+                .build()
+            androidx.core.app.ServiceCompat.startForeground(
+                this, FALLBACK_NOTIFICATION_ID, notification,
+                if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0,
+            )
+            androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }
+        pauseAllPlayersAndStopSelf()
     }
 
     private fun hasAudioPermission(): Boolean {
@@ -254,6 +318,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     companion object {
+        private const val FALLBACK_CHANNEL = "playback_idle"
+        private const val FALLBACK_NOTIFICATION_ID = 0x4841
         /**
          * The player itself (the service runs in the app's process), for what must be exact on every frame: the position the lyrics
          * are drawn at. Through the session the controller's position is extrapolated and corrected every 3 s, by up to ~130 ms.

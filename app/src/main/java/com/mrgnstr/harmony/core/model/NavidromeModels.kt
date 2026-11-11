@@ -92,6 +92,29 @@ fun normalizeServerUrl(raw: String): String {
     }
 }
 
+/**
+ * Addresses to try for what the user typed. An explicit scheme is respected as is; otherwise https and http, with
+ * http first for hosts that are almost always plain-http LAN servers (private/loopback IPs, localhost, .local, bare names).
+ * Kept apart from [normalizeServerUrl], which runs on every request and must not change for saved accounts.
+ */
+fun serverUrlCandidates(raw: String): List<String> {
+    val trimmed = raw.trim().trimEnd('/')
+    if (trimmed.isEmpty()) return emptyList()
+    val lower = trimmed.lowercase()
+    if (lower.startsWith("http://")) return listOf("http://" + trimmed.substring(7))
+    if (lower.startsWith("https://")) return listOf("https://" + trimmed.substring(8))
+    val host = trimmed.substringBefore('/').substringBefore('?').substringAfterLast('@').substringBefore(':').lowercase()
+    return if (isLikelyLanHost(host)) listOf("http://$trimmed", "https://$trimmed") else listOf("https://$trimmed", "http://$trimmed")
+}
+
+private fun isLikelyLanHost(host: String): Boolean {
+    if (host == "localhost" || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".home.arpa")) return true
+    if (!host.contains('.') && !host.contains(':')) return true
+    val p = host.split('.').mapNotNull { it.toIntOrNull() }
+    if (p.size != 4 || host.split('.').size != 4) return false
+    return p[0] == 10 || p[0] == 127 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && p[1] in 16..31) || (p[0] == 169 && p[1] == 254)
+}
+
 /** A Navidrome library / Subsonic musicFolder. */
 data class MusicFolder(
     val id: Int,
