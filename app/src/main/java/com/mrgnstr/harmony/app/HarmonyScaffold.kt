@@ -485,7 +485,7 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                                 },
                         )
                         PlayerSheet(
-                            sheet, restingBottom = barTop + MiniPlayerGap, blur = blur,
+                            sheet, restingBottom = barTop + MiniPlayerGap, blur = blur, schemes = schemes, dark = dark,
                             onThrownDown = minimize::collapse,
                             dock = if (vertical) {
                                 // Always on the bar's bottom row, beside the bar's column and as wide as what is left (so the next button stays).

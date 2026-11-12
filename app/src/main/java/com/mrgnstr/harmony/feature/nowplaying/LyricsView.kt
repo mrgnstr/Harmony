@@ -122,6 +122,9 @@ private val TranslationLineHeight = 23.sp
 private val SideInset = 32.dp
 private val LineInset = 15.dp
 
+/** The colour the lyrics are written in: white over the darkened cover, the scheme's text colour in the classic layout. */
+internal val LocalLyricsInk = androidx.compose.runtime.compositionLocalOf { Color.White }
+
 private const val DimAlpha = 0.35f
 private const val BackgroundDim = 0.25f
 private const val BackgroundLit = 0.55f
@@ -480,6 +483,7 @@ internal fun LyricsView(
 
 @Composable
 private fun LyricsEmpty(fileAccess: Boolean) {
+    val ink = LocalLyricsInk.current
     // Shown only after a moment: lyrics load after the song changes, and a flash of "No lyrics" in between is wrong.
     val alpha = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
@@ -491,17 +495,17 @@ private fun LyricsEmpty(fileAccess: Boolean) {
         Modifier.fillMaxSize().graphicsLayer { this.alpha = shown.value },
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("No lyrics", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = DimAlpha + 0.2f))
+        Text("No lyrics", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = ink.copy(alpha = DimAlpha + 0.2f))
         if (!fileAccess) {
             val context = LocalContext.current
             Spacer(Modifier.height(16.dp))
             Text(
                 "Allow Access to Lyrics Files",
                 Modifier
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    .background(ink.copy(alpha = 0.2f), CircleShape)
                     .clickable { openAllFilesAccess(context) }
                     .padding(horizontal = 18.dp, vertical = 10.dp),
-                fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink,
             )
         }
     }
@@ -611,6 +615,7 @@ private fun LineItem(
     blurOn: State<Float>,
     onSeek: (Long) -> Unit,
 ) {
+    val ink = LocalLyricsInk.current
     val line = row.line
     // Lit a little before it is sung (and, without syllables, handing over to the next line as that one lights).
     val litEnd = litEndOf(row)
@@ -656,7 +661,7 @@ private fun LineItem(
                 line.translation,
                 Modifier.fillMaxWidth().graphicsLayer { alpha = TranslationAlpha },
                 fontSize = TranslationSize, lineHeight = TranslationLineHeight, fontWeight = FontWeight.SemiBold,
-                color = Color.White, textAlign = align,
+                color = ink, textAlign = align,
             )
         }
         val bg = line.background
@@ -689,6 +694,7 @@ private fun LineItem(
 /** The dots of a pause: folded away until it is playing, then they light up one by one over its length. */
 @Composable
 private fun GapItem(row: LyricRow.Gap, pos: State<Long>) {
+    val ink = LocalLyricsInk.current
     val on by remember(row) { derivedStateOf { pos.value in row.start until litEndOf(row) } }
     val open = animateFloatAsState(if (on) 1f else 0f, spring(dampingRatio = 1f, stiffness = 260f), label = "gap-open")
     val dot = 10.dp
@@ -713,7 +719,7 @@ private fun GapItem(row: LyricRow.Gap, pos: State<Long>) {
         for (d in 0 until 3) {
             val lit = (f * 3f - d).coerceIn(0f, 1f)
             val x = SideInset.toPx() + r + d * (2 * r + gap)
-            drawCircle(Color.White.copy(alpha = lerp(DimAlpha, 1f, lit)), r * pulse, Offset(x, size.height / 2f))
+            drawCircle(ink.copy(alpha = lerp(DimAlpha, 1f, lit)), r * pulse, Offset(x, size.height / 2f))
         }
     }
 }
@@ -869,9 +875,9 @@ private fun glowOf(word: Word, t: Long): Float {
 }
 
 /** The glow follows the sweep: strongest just behind its edge, trailing off behind it (the part not yet sung has none). */
-private fun glowBrush(edge: Float, fade: Float): Brush {
+private fun glowBrush(edge: Float, fade: Float, ink: Color): Brush {
     val span = fade * 4f
-    return Brush.horizontalGradient(0f to Color.White.copy(alpha = 0.3f), 0.7f to Color.White, 1f to Color.Transparent, startX = edge - span, endX = edge)
+    return Brush.horizontalGradient(0f to ink.copy(alpha = 0.3f), 0.7f to ink, 1f to Color.Transparent, startX = edge - span, endX = edge)
 }
 
 private fun DrawScope.clipOutAll(rects: List<Rect>, i: Int, block: DrawScope.() -> Unit) {
@@ -880,9 +886,9 @@ private fun DrawScope.clipOutAll(rects: List<Rect>, i: Int, block: DrawScope.() 
     }
 }
 
-private fun sweepBrush(edge: Float, fade: Float, rtl: Boolean, width: Float): Brush =
-    if (!rtl) Brush.horizontalGradient(0f to Color.White, 1f to Color.Transparent, startX = edge - fade, endX = edge)
-    else Brush.horizontalGradient(0f to Color.White, 1f to Color.Transparent, startX = width - (edge - fade), endX = width - edge)
+private fun sweepBrush(edge: Float, fade: Float, rtl: Boolean, width: Float, ink: Color): Brush =
+    if (!rtl) Brush.horizontalGradient(0f to ink, 1f to Color.Transparent, startX = edge - fade, endX = edge)
+    else Brush.horizontalGradient(0f to ink, 1f to Color.Transparent, startX = width - (edge - fade), endX = width - edge)
 
 /**
  * One line of text. Without timed syllables it is dimmed, and lit as a whole while it is sung. With them, the text is dimmed and
@@ -911,6 +917,7 @@ private fun LyricText(
     rubySize: TextUnit = RubySize,
     rubyExtra: TextUnit = RubyExtra,
 ) {
+    val ink = LocalLyricsInk.current
     val located = remember(text, cues, lineEnd) { locate(text, cues, lineEnd) }
     val rubyOn = ruby != null && located != null && ruby.size == located.size
     val style = TextStyle(
@@ -921,7 +928,7 @@ private fun LyricText(
     if (located == null) {
         Text(
             text, modifier.fillMaxWidth().graphicsLayer { alpha = lerp(dim, litAlpha, litAmount.value) },
-            style = style, color = Color.White,
+            style = style, color = ink,
         )
         return
     }
@@ -975,13 +982,13 @@ private fun LyricText(
                         // Flush with the start of its syllable (its end, for the right-aligned second voice).
                         val x = (if (align == TextAlign.End) p.realR - r.size.width else p.realL).coerceIn(0f, max(0f, g.width - r.size.width))
                         val at = Offset(x, vl.bottom - rubyExtra.toPx())
-                        if (!lit) drawText(r, Color.White, topLeft = at, alpha = dim)
+                        if (!lit) drawText(r, ink, topLeft = at, alpha = dim)
                         else {
                             // Its own sweep, over the time its syllable is sung and over its own width (it can be wider than the
                             // syllable); the brush is in the text's own coordinates.
                             val pr = ((t - w.t0).toFloat() / (w.t1 - w.t0).coerceAtLeast(1L)).coerceIn(0f, 1f)
                             val edge = r.size.width * pr + fade * (EdgeLead + (1f - EdgeLead) * pr) * (if (t > w.t0) 1f else 0f)
-                            drawText(r, sweepBrush(edge, fade, false, r.size.width.toFloat()), topLeft = at, alpha = litAlpha * amount)
+                            drawText(r, sweepBrush(edge, fade, false, r.size.width.toFloat(), ink), topLeft = at, alpha = litAlpha * amount)
                         }
                     }
                 }
@@ -998,7 +1005,7 @@ private fun LyricText(
                 clipOutAll(holes, 0) {
                     for (vl in g.lines) {
                         val edge = edgeOf(vl, t, fade)
-                        val brush = if (edge > vl.pieces.first().l + 0.5f) sweepBrush(edge, fade, g.rtl, g.width) else null
+                        val brush = if (edge > vl.pieces.first().l + 0.5f) sweepBrush(edge, fade, g.rtl, g.width, ink) else null
                         // Every syllable rises as a whole when it starts: the ones that have the same lift (all those done, all those
                         // to come) are drawn as one run, the one or two on their way up on their own.
                         val pieces = vl.pieces
@@ -1011,7 +1018,7 @@ private fun LyricText(
                             val to = if (j >= pieces.size) g.width else pieces[j].l
                             clipLine(vl, g, from, to, liftPx * 1.5f) {
                                 translate(top = -lift) {
-                                    drawText(l, Color.White, alpha = dim)
+                                    drawText(l, ink, alpha = dim)
                                     if (brush != null) drawText(l, brush, alpha = litAlpha * amount)
                                 }
                             }
@@ -1027,7 +1034,7 @@ private fun LyricText(
                     val scale = 1f + GlowGrowth * strength
                     val lift = liftPx * amount * riseOf(t, w.t0, w.t1)
                     val edge = edgeOf(vl, t, fade)
-                    val brush = sweepBrush(edge, fade, false, g.width)
+                    val brush = sweepBrush(edge, fade, false, g.width, ink)
                     // The line's own glyphs (the same font and place as the rest of it), scaled about the syllable's bottom centre.
                     withTransform({ scale(scale, scale, Offset((p.realL + p.realR) / 2f, vl.bottom)) }) {
                         translate(top = -lift) {
@@ -1039,20 +1046,20 @@ private fun LyricText(
                                 layer.alpha = 0.9f * strength
                                 layer.record(this, layoutDirection, IntSize(l.size.width, l.size.height)) {
                                     clipRect(p.realL, vl.top, p.realR, vl.bottom) {
-                                        drawText(l, glowBrush(edge, fade), alpha = litAlpha * amount)
+                                        drawText(l, glowBrush(edge, fade, ink), alpha = litAlpha * amount)
                                     }
                                 }
                                 drawLayer(layer)
                             }
                             clipRect(p.realL, vl.top - liftPx * 1.5f, p.realR, vl.bottom) {
-                                drawText(l, Color.White, alpha = dim)
+                                drawText(l, ink, alpha = dim)
                                 drawText(l, brush, alpha = litAlpha * amount)
                             }
                         }
                     }
                 }
             },
-        style = style, color = Color.White.copy(alpha = dim),
+        style = style, color = ink.copy(alpha = dim),
         onTextLayout = { layout = it },
     )
 }

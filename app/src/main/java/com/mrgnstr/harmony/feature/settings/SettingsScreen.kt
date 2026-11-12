@@ -133,6 +133,13 @@ class SettingsViewModel @Inject constructor(
     val alwaysDark: StateFlow<Boolean> = settings.nowPlayingAlwaysDark
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     fun setAlwaysDark(on: Boolean) { viewModelScope.launch { settings.setNowPlayingAlwaysDark(on) } }
+
+    val classicNowPlaying: StateFlow<Boolean> = settings.nowPlayingClassic
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val classicCoverRadius: StateFlow<Int> = settings.classicCoverRadius
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 15)
+    fun setClassicCoverRadius(dp: Int) { viewModelScope.launch { settings.setClassicCoverRadius(dp) } }
+    fun setClassicNowPlaying(on: Boolean) { viewModelScope.launch { settings.setNowPlayingClassic(on) } }
     fun setMinimumDuration(ms: Long) { viewModelScope.launch { settings.setMinimumDuration(ms) } }
     fun setFolderExcluded(path: String, excluded: Boolean) { viewModelScope.launch { settings.setFolderExcluded(path, excluded) } }
     suspend fun localMusicFolders(): List<String> = runCatching { scanner.musicFolders() }.getOrDefault(emptyList())
@@ -229,6 +236,8 @@ fun SettingsRoute(
     val scanStatus by viewModel.scanStatus.collectAsStateWithLifecycle()
     val musicFolders by viewModel.musicFolders.collectAsStateWithLifecycle()
     val alwaysDark by viewModel.alwaysDark.collectAsStateWithLifecycle()
+    val classicNowPlaying by viewModel.classicNowPlaying.collectAsStateWithLifecycle()
+    val classicCoverRadius by viewModel.classicCoverRadius.collectAsStateWithLifecycle()
     val collapseBars by viewModel.collapseBars.collectAsStateWithLifecycle()
     val showAudioInfo by viewModel.showAudioInfo.collectAsStateWithLifecycle()
     val libraryFilters by viewModel.libraryFilters.collectAsStateWithLifecycle()
@@ -431,10 +440,9 @@ fun SettingsRoute(
                         )
                         Slider(
                             value = seconds,
-                            onValueChange = { seconds = it },
+                            onValueChange = { seconds = (it / 5f).roundToInt() * 5f },
                             onValueChangeFinished = { viewModel.setMinimumDuration(seconds.roundToInt() * 1000L) },
                             valueRange = 0f..300f,
-                            steps = 59,
                         )
                     }
                 }
@@ -516,9 +524,8 @@ fun SettingsRoute(
                             )
                             Slider(
                                 value = rgPreamp,
-                                onValueChange = viewModel::setReplayGainPreamp,
+                                onValueChange = { viewModel.setReplayGainPreamp(it.roundToInt().toFloat()) },
                                 valueRange = -12f..12f,
-                                steps = 23,
                             )
                         }
                     }
@@ -727,6 +734,24 @@ fun SettingsRoute(
                         onCheckedChange = viewModel::setShowAudioInfo,
                     )
                     SwitchSettingRow(
+                        title = "Classic Now Playing",
+                        subtitle = "A smaller cover on a plain surface, coloured from the cover like the album page",
+                        checked = classicNowPlaying,
+                        onCheckedChange = viewModel::setClassicNowPlaying,
+                    )
+                    if (classicNowPlaying) {
+                        var radius by remember(classicCoverRadius) { mutableFloatStateOf(classicCoverRadius.toFloat()) }
+                        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                            Text("Cover Corner Radius: ${radius.roundToInt()} dp", style = MaterialTheme.typography.bodyMedium)
+                            Slider(
+                                value = radius,
+                                onValueChange = { radius = it.roundToInt().toFloat() },
+                                onValueChangeFinished = { viewModel.setClassicCoverRadius(radius.roundToInt()) },
+                                valueRange = 0f..48f,
+                            )
+                        }
+                    }
+                    SwitchSettingRow(
                         title = "Always Dark Now Playing",
                         subtitle = "Always light controls and a dimmed bottom, even on bright covers",
                         checked = alwaysDark,
@@ -759,14 +784,6 @@ fun SettingsRoute(
                             selected = tabBarSide,
                             optionLabel = { it.label },
                             onSelect = viewModel::setTabBarSide,
-                        )
-                    }
-                    if (onOpenGallery != null) {
-                        MediaRow(
-                            title = "Design gallery",
-                            subtitle = "Colour engine, motion and components (M2)",
-                            leading = { SymbolIcon(Symbols.Palette, null, tint = MaterialTheme.colorScheme.primary) },
-                            onClick = onOpenGallery,
                         )
                     }
                 }
@@ -808,6 +825,14 @@ fun SettingsRoute(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) {
                     Column(Modifier.padding(vertical = 8.dp)) {
+                        if (onOpenGallery != null) {
+                            MediaRow(
+                                title = "Design gallery",
+                                subtitle = "Colour engine, motion and components (M2)",
+                                leading = { SymbolIcon(Symbols.Palette, null, tint = MaterialTheme.colorScheme.primary) },
+                                onClick = onOpenGallery,
+                            )
+                        }
                         SwitchSettingRow(
                             title = "Switches over the cover",
                             subtitle = "Now Playing; swipe sideways on the cover to hide or show them",

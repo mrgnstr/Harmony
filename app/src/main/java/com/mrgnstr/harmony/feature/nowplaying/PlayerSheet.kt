@@ -188,6 +188,25 @@ private const val ScrimIntoCover = 0.15f
 /** How many songs ahead of the playing one get their cover blur built in advance. */
 private const val PrewarmAhead = 3
 
+/** The classic layout's cover: side margin, breathing room above and below it, corner radius. */
+private val ClassicArtMargin = 28.dp
+private val ClassicArtGap = 16.dp
+
+/** Themes the full player with the cover-seeded [scheme] in the classic layout (null: as it is). */
+@Composable
+private fun ClassicTheme(scheme: androidx.compose.material3.ColorScheme?, content: @Composable () -> Unit) {
+    if (scheme == null) { content(); return }
+    com.mrgnstr.harmony.core.designsystem.theme.HarmonyTheme(
+        scheme, LocalVisualTier.current, com.mrgnstr.harmony.core.designsystem.LocalChromeBlurMode.current,
+        com.mrgnstr.harmony.core.designsystem.LocalCoverBlurMode.current,
+    ) {
+        CompositionLocalProvider(
+            LocalClassicPlayer provides true, LocalLyricsInk provides scheme.onSurface, LocalContentColor provides scheme.onSurface,
+            content = content,
+        )
+    }
+}
+
 @Composable
 fun PlayerSheet(
     state: PlayerSheetState,
@@ -195,6 +214,8 @@ fun PlayerSheet(
     blur: ChromeBlurState,
     modifier: Modifier = Modifier,
     dock: MiniDock? = null,
+    schemes: com.mrgnstr.harmony.core.designsystem.theme.SchemeFactory? = null,
+    dark: Boolean = false,
     onThrownDown: () -> Unit = {},
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
@@ -217,9 +238,20 @@ fun PlayerSheet(
     val panel = rememberPanelState()
     val showAudioInfo = viewModel.showAudioInfo.collectAsStateWithLifecycle().value
     val alwaysDark = viewModel.alwaysDark.collectAsStateWithLifecycle().value
+    val classic = viewModel.classicLayout.collectAsStateWithLifecycle().value && schemes != null
+    val classicRadius = viewModel.classicCoverRadius.collectAsStateWithLifecycle().value.dp
+    val seed = viewModel.accentSeed.collectAsStateWithLifecycle().value
+    // The album page's own scheme for this cover (same seed, same palette rules), settling like a page does.
+    val classicScheme = if (classic && schemes != null) {
+        com.mrgnstr.harmony.core.designsystem.theme.animateColorScheme(
+            schemes.scheme(seed?.let { com.mrgnstr.harmony.core.designsystem.theme.ColorSource.Seed(it) } ?: com.mrgnstr.harmony.core.designsystem.theme.ColorSource.Wallpaper, dark),
+            snap = false, lowTier = LocalVisualTier.current == VisualTier.LOW,
+        )
+    } else null
     val vmColors = (if (alwaysDark) viewModel.darkCoverColors else viewModel.coverColors).collectAsStateWithLifecycle().value
     // Over the darkened, blurred lyrics background the dark controls of a bright cover would not be seen: they turn light.
-    val coverColors = animateCoverColors(if (panel.panel != NowPlayingPanel.None && vmColors.scrim < 0.01f) DefaultCoverColors else vmColors)
+    val darkened = animateCoverColors(if (panel.panel != NowPlayingPanel.None && vmColors.scrim < 0.01f) DefaultCoverColors else vmColors)
+    val coverColors = if (classicScheme != null) remember(classicScheme) { classicCoverColors(classicScheme) } else darkened
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val lowTier = LocalVisualTier.current == VisualTier.LOW
@@ -227,7 +259,7 @@ fun PlayerSheet(
     val clamped: () -> Float = { state.visual.coerceIn(0f, 1f) }
     // Whether the current drag began with the mini player resting.
     val fromRest = remember { mutableStateOf(false) }
-    StatusBarIconsFollowCover(state, coverColors, panelOpen = panel.panel != NowPlayingPanel.None)
+    StatusBarIconsFollowCover(state, coverColors, panelOpen = panel.panel != NowPlayingPanel.None, classic = classic)
     ControlsAutoHide(panel, snap.isPlaying)
     LaunchedEffect(state, panel) {
         // Collapsed: the lyrics stay open for next time; the queue does not.
@@ -273,10 +305,15 @@ fun PlayerSheet(
 
         // The cover is edge to edge and square. On a tall screen it sits centred between the status bar and the controls with blur
         // above and below; on a short one it is pinned to the top, with no blur above, and the controls share what is left.
-        val fullArt = screenW
+        // In the classic layout it is inset with rounded corners, centred between the status bar and the controls (smaller if short of room).
         val controlsNatural = with(density) { fullControlsHeight(showAudioInfo).toPx() }
         val naturalControlsTop = screenH - navBottom - with(density) { FullControlsBottomGap.toPx() } - controlsNatural
-        val compact = naturalControlsTop - fullArt < statusTop
+        val fullArt = if (classic) {
+            minOf(screenW - 2 * with(density) { ClassicArtMargin.toPx() }, naturalControlsTop - statusTop - 2 * with(density) { ClassicArtGap.toPx() })
+                .coerceAtLeast(with(density) { MiniArt.toPx() } * 2f)
+        } else screenW
+        val artX = (screenW - fullArt) / 2f
+        val compact = !classic && naturalControlsTop - fullArt < statusTop
         val fullArtY = if (compact) 0f else (statusTop + (naturalControlsTop - statusTop - fullArt) / 2f).roundToInt().toFloat()
         val controlsTop = if (compact) fullArt else naturalControlsTop
         val controlsBottom = if (compact) screenH - navBottom else naturalControlsTop + controlsNatural
@@ -294,7 +331,7 @@ fun PlayerSheet(
         val shaderBlur = com.mrgnstr.harmony.core.designsystem.realTimeBlur()
         val specOf = com.mrgnstr.harmony.core.artwork.rememberCoverStripSpecFactory()
         val upcoming = viewModel.queue.collectAsStateWithLifecycle().value.upcoming.take(PrewarmAhead).map { it.songId to it.albumId }
-        if (!shaderBlur || !liveBlur) {
+        if (!classic && (!shaderBlur || !liveBlur)) {
             val wPx = screenW.roundToInt(); val hPx = screenH.roundToInt()
             val topPx = fullArtY.roundToInt(); val bottomPx = (fullArtY + fullArt).roundToInt()
             LaunchedEffect(songId, snap.albumId, upcoming, specOf, wPx, hPx, topPx, bottomPx, shaderBlur, liveBlur) {
@@ -347,7 +384,7 @@ fun PlayerSheet(
         // rises linearly, and clip it). Its height is the centre's share of the way to the open cover, which dips below the start
         // before rising because the cover grows downward faster than its top rises.
         val coverSize: (Float) -> Float = { p -> lerp(miniArt, fullArt, p) }
-        val coverLeft: (Float) -> Float = { p -> lerp(miniArtX + miniArt / 2f, fullArt / 2f, coverCenter(p)) - coverSize(p) / 2f }
+        val coverLeft: (Float) -> Float = { p -> lerp(miniArtX + miniArt / 2f, artX + fullArt / 2f, coverCenter(p)) - coverSize(p) / 2f }
         val coverTop: (Float) -> Float = { p -> lerp(miniArtY, fullArtY, coverRise(p)) }
 
         // The expanding object is the mini player's own blurred pill, resized every frame to the full screen with corners that
@@ -375,10 +412,12 @@ fun PlayerSheet(
             val p = clamped()
             // In a panel the scene does not shrink onto the cover: it stays full screen, moves down with the pill's top edge and is clipped by it (k = 1).
             val k = panel.open.value
-            val s = lerp(lerp(miniArt / fullArt, 1f, p), 1f, k)
+            val s0 = lerp(miniArt / fullArt, 1f, p)
+            val s = lerp(s0, 1f, k)
             transformOrigin = TransformOrigin(0f, fullArtY / screenH)
             scaleX = s; scaleY = s
-            translationX = lerp(coverLeft(p), 0f, k)
+            // The anchor (the cover's square, at artX in the layer) sits on the cover.
+            translationX = lerp(coverLeft(p) - s0 * artX, 0f, k)
             // In a panel it is pinned to the pill's top edge as it rises, like the mini player's own row.
             translationY = lerp(coverTop(p) - fullArtY, lerp(restingTop, 0f, p), k) + sag()
             // The cover's small radius at rest; open, the display's own radius at each corner (divided by the scale: the layer is scaled).
@@ -386,8 +425,8 @@ fun PlayerSheet(
             fun r(display: Float) = CornerRadius(lerp(rest, display, p) * cornerKeep.value / s)
             shape = RectShape(
                 RoundRect(
-                    left = 0f, top = lerp(fullArtY * (1f - p), 0f, k),
-                    right = lerp(fullArt + p * (screenW - fullArt), screenW, k),
+                    left = lerp(artX * (1f - p), 0f, k), top = lerp(fullArtY * (1f - p), 0f, k),
+                    right = lerp(artX + fullArt + p * (screenW - artX - fullArt), screenW, k),
                     bottom = lerp(fullArtY + fullArt + p * (screenH - fullArtY - fullArt), screenH, k),
                     topLeftCornerRadius = r(corners.tl), topRightCornerRadius = r(corners.tr),
                     bottomRightCornerRadius = r(corners.br), bottomLeftCornerRadius = r(corners.bl),
@@ -441,6 +480,10 @@ fun PlayerSheet(
                 .panelTouches(panel) { panel.controlsTop - with(density) { 64.dp.toPx() } },
         ) {
 
+            // Classic: the plain surface (a menu's colour) takes the pill's place as it opens; the mini row fades out over it.
+            if (classicScheme != null) {
+                Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade(clamped() / 0.3f) }.background(classicScheme.surfaceContainer))
+            }
             // Under the whole scene (cover, blur, controls); taps reach it because the scene is cropped to the cover while collapsed.
             if (showMini) {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
@@ -481,7 +524,7 @@ fun PlayerSheet(
 
             // Solid ground under the scene, cropped and grown like it: the blur layers are bitmaps or a shader that can end a pixel or
             // two short of the screen edge, and the page behind must never show through there.
-            Box(
+            if (!classic) Box(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() }.background(Color.Black),
             )
 
@@ -499,7 +542,7 @@ fun PlayerSheet(
                 translationX = lerp(coverLeft(p), lerp(miniArtX, headerX, p), q)
                 translationY = lerp(coverTop(p), lerp(miniArtY, headerY, p), q) + sag()
                 // The radius is set in the layer's own (unscaled) space, so divide the on-screen one by the scale.
-                val radius = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
+                val radius = lerp(lerp(MiniArtRadius.toPx(), if (classic) classicRadius.toPx() else 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
                 shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
                 clip = true
             }
@@ -538,7 +581,7 @@ fun PlayerSheet(
 
             // The blur around the cover, drawn over it: it fades into the picture's own edge rows. In a panel it is the background:
             // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid up.
-            Box(
+            if (!classic) Box(
                 Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
                     alpha = sceneAlpha()
@@ -584,7 +627,7 @@ fun PlayerSheet(
                 }
             }
 
-            if (showFull) {
+            if (showFull) ClassicTheme(classicScheme) {
                 val progress by viewModel.progress.collectAsStateWithLifecycle()
                 val queue by viewModel.queue.collectAsStateWithLifecycle()
                 val favourite by viewModel.isFavourite.collectAsStateWithLifecycle()
@@ -623,7 +666,7 @@ fun PlayerSheet(
                 // The scene is blurred as one in a panel, so its progressive blur is gone there; and the panel's cover lies over the
                 // strips' fade into it, which would only appear (snap in) when the panel is gone. So the same strips and darkening,
                 // unblurred, moving with the scene, are drawn over the cover and fade out as the panel opens and back in as it closes.
-                val stripsOverlay by remember { derivedStateOf { liveBlur && panel.visible && panel.q() < StripsFadeEnd + 0.05f } }
+                val stripsOverlay by remember { derivedStateOf { !classic && liveBlur && panel.visible && panel.q() < StripsFadeEnd + 0.05f } }
                 if (stripsOverlay) {
                     Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(clamped() / 0.15f) }) {
                         Box(
@@ -687,10 +730,10 @@ fun PlayerSheet(
                     }
                 }
                 val debugShown by remember { derivedStateOf { state.progress.value > 0.99f && panel.panel == NowPlayingPanel.None } }
-                if (com.mrgnstr.harmony.core.debug.DebugOptions.enabled && debugShown) {
+                if (!classic && com.mrgnstr.harmony.core.debug.DebugOptions.enabled && debugShown) {
                     DebugOverlay(
                         Modifier
-                            .offset { IntOffset(0, fullArtY.roundToInt()) }
+                            .offset { IntOffset(artX.roundToInt(), fullArtY.roundToInt()) }
                             .size(with(density) { fullArt.toDp() }),
                     )
                 }
@@ -703,11 +746,12 @@ fun PlayerSheet(
  * The status bar's icons follow what is under them: the cover (or its blur) while Now Playing is open, the theme otherwise.
  */
 @Composable
-private fun StatusBarIconsFollowCover(state: PlayerSheetState, colors: CoverColors, panelOpen: Boolean) {
+private fun StatusBarIconsFollowCover(state: PlayerSheetState, colors: CoverColors, panelOpen: Boolean, classic: Boolean) {
     val view = LocalView.current
     val themeDark = MaterialTheme.colorScheme.background.red < 0.5f
     // The lyrics' background is darkened: light icons.
-    val coverIsLight = colors.lightTop && !panelOpen
+    // The classic layout is a plain surface: the icons follow its brightness.
+    val coverIsLight = if (classic) colors.lightTop else colors.lightTop && !panelOpen
     LaunchedEffect(coverIsLight, themeDark) {
         val window = (view.context as? android.app.Activity)?.window ?: return@LaunchedEffect
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)

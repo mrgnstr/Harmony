@@ -42,6 +42,15 @@ val DefaultCoverColors = CoverColors(
 
 val LocalCoverColors = compositionLocalOf { DefaultCoverColors }
 
+/** The classic layout: the player is themed with a real colour scheme, so menus and sheets need no [NowPlayingPopupTheme]. */
+val LocalClassicPlayer = compositionLocalOf { false }
+
+/** The controls' colours in the classic layout: the cover-seeded scheme's own roles, nothing darkened. */
+fun classicCoverColors(s: androidx.compose.material3.ColorScheme) = CoverColors(
+    accent = s.primary, onAccent = s.onPrimary, text = s.onSurface, textSoft = s.onSurfaceVariant,
+    tonal = s.surfaceContainerHighest, scrim = 0f, lightTop = s.surface.luminance() > 0.5f,
+)
+
 /** Above this brightness of the cover's bottom edge the controls turn dark instead of light. */
 private const val BrightCover = 0.58f
 
@@ -103,6 +112,7 @@ fun animateCoverColors(target: CoverColors): CoverColors {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NowPlayingPopupTheme(content: @Composable () -> Unit) {
+    if (LocalClassicPlayer.current) { content(); return }
     val c = LocalCoverColors.current
     val base = MaterialTheme.colorScheme
     val hct = Hct.fromInt(c.accent.toArgb())

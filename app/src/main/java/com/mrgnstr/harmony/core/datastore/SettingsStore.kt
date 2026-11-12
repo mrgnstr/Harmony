@@ -2,6 +2,7 @@ package com.mrgnstr.harmony.core.datastore
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -79,6 +80,20 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
     val nowPlayingAlwaysDark: Flow<Boolean> = context.settingsDataStore.data.map { it[nowPlayingAlwaysDarkKey] ?: false }
 
     suspend fun setNowPlayingAlwaysDark(on: Boolean) { context.settingsDataStore.edit { it[nowPlayingAlwaysDarkKey] = on } }
+
+    private val nowPlayingClassicKey = booleanPreferencesKey("now_playing_classic")
+
+    /** Now Playing as a traditional player: an inset cover on a plain Material surface, coloured from the cover like the album page. Off by default. */
+    val nowPlayingClassic: Flow<Boolean> = context.settingsDataStore.data.map { it[nowPlayingClassicKey] ?: false }
+
+    suspend fun setNowPlayingClassic(on: Boolean) { context.settingsDataStore.edit { it[nowPlayingClassicKey] = on } }
+
+    private val classicCoverRadiusKey = intPreferencesKey("now_playing_classic_cover_radius")
+
+    /** Corner radius (dp) of the classic Now Playing cover. */
+    val classicCoverRadius: Flow<Int> = context.settingsDataStore.data.map { (it[classicCoverRadiusKey] ?: 15).coerceIn(0, 48) }
+
+    suspend fun setClassicCoverRadius(dp: Int) { context.settingsDataStore.edit { it[classicCoverRadiusKey] = dp.coerceIn(0, 48) } }
 
     private val collapseBarsKey = booleanPreferencesKey("collapse_bars_on_scroll")
 

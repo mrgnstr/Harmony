@@ -137,6 +137,20 @@ class NowPlayingViewModel @Inject constructor(
     val collapseBarsOnScroll: StateFlow<Boolean> = settings.collapseBarsOnScroll
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val classicCoverRadius: StateFlow<Int> = settings.classicCoverRadius
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 15)
+
+    val classicLayout: StateFlow<Boolean> = settings.nowPlayingClassic
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** The seed the album page themes itself from (the cover's palette), for the classic layout's colour scheme; null = no art. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val accentSeed: StateFlow<Int?> = player.state
+        .map { (it.songId ?: 0L) to it.albumId }
+        .distinctUntilChanged { a, b -> a.second == b.second && a.second > 0 }
+        .mapLatest { (songId, albumId) -> if (songId == 0L) null else colorStore.paletteFor(songId, albumId)?.takeIf { it.hasArt }?.primary }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     val showAudioInfo: StateFlow<Boolean> = settings.showAudioInfo
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
