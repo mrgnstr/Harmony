@@ -124,6 +124,7 @@ import com.mrgnstr.harmony.feature.artist.ArtistRoute
 import com.mrgnstr.harmony.feature.artist.ArtistSongsRoute
 import com.mrgnstr.harmony.feature.artist.ArtistInfoRoute
 import com.mrgnstr.harmony.feature.album.AlbumRoute
+import com.mrgnstr.harmony.feature.gallery.FlowGalleryRoute
 import com.mrgnstr.harmony.feature.gallery.GalleryRoute
 import com.mrgnstr.harmony.feature.home.HomeRoute
 import com.mrgnstr.harmony.feature.home.HomeShelfRoute
@@ -335,8 +336,10 @@ private fun Shell(nav: TabNavigator, openPlayer: Int, schemes: SchemeFactory, da
                 GalleryRoute(onBack = back,
                     onOpenAlbums = { nav.push(Dest.LibraryAlbums(it)) },
                     onOpenSongs = { nav.push(Dest.LibrarySongs(it)) },
-                    onOpenAlbum = openAlbum)
+                    onOpenAlbum = openAlbum,
+                    onOpenFlow = { nav.push(Dest.FlowGallery) })
             }
+            entry<Dest.FlowGallery> { FlowGalleryRoute(onBack = back) }
             entry<Dest.Album>(metadata = mapOf(CoverPageMetadata to true)) { album ->
                 AlbumRoute(
                     album.albumId, album.title, onBack = back,

@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
@@ -114,6 +115,7 @@ fun GalleryRoute(
     onOpenAlbums: (Int?) -> Unit,
     onOpenSongs: (Int?) -> Unit,
     onOpenAlbum: (Album) -> Unit,
+    onOpenFlow: () -> Unit,
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     var seedIndex by rememberSaveable { mutableStateOf(1) }
@@ -138,6 +140,12 @@ fun GalleryRoute(
                 BlurMode.entries.forEach { mode ->
                     ToggleButton(checked = mode == chromeBlur, onCheckedChange = { viewModel.setChromeBlur(mode) }) { Text(mode.name) }
                 }
+            }
+        }
+        item { SectionHeading("Prototypes") }
+        item {
+            Row(Modifier.padding(horizontal = 16.dp)) {
+                Button(onClick = onOpenFlow) { Text("Flow background (Apple Music style)") }
             }
         }
         item { SectionHeading("Buttons") }

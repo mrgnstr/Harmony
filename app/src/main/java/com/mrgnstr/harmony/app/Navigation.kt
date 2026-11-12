@@ -39,6 +39,8 @@ sealed interface Dest {
     data object Settings : Dest
     /** Debug: every design-system piece in one place (M2). */
     data object Gallery : Dest
+    /** Debug: the Apple Music-style flow background prototype, a submenu of the gallery. */
+    data object FlowGallery : Dest
 }
 
 /** One back stack per tab; switching tabs keeps each stack alive. */
@@ -129,6 +131,7 @@ private fun Dest.encode(): List<Any> = when (this) {
     is Dest.Playlist -> listOf("playlist", playlistId)
     Dest.Settings -> listOf("settings")
     Dest.Gallery -> listOf("gallery")
+    Dest.FlowGallery -> listOf("flowGallery")
 }
 
 private fun decodeDest(parts: List<Any>): Dest? = runCatching {
@@ -148,6 +151,7 @@ private fun decodeDest(parts: List<Any>): Dest? = runCatching {
         "playlist" -> Dest.Playlist(parts[1] as Long)
         "settings" -> Dest.Settings
         "gallery" -> Dest.Gallery
+        "flowGallery" -> Dest.FlowGallery
         else -> null
     }
 }.getOrNull()
