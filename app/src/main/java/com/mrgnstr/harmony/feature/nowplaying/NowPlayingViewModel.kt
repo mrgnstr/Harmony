@@ -140,6 +140,9 @@ class NowPlayingViewModel @Inject constructor(
     val classicCoverRadius: StateFlow<Int> = settings.classicCoverRadius
         .stateIn(viewModelScope, SharingStarted.Eagerly, 15)
 
+    val flowBackground: StateFlow<Boolean> = settings.flowBackground
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val classicLayout: StateFlow<Boolean> = settings.nowPlayingClassic
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 

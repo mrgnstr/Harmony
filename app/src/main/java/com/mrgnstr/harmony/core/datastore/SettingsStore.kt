@@ -88,6 +88,17 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setNowPlayingClassic(on: Boolean) { context.settingsDataStore.edit { it[nowPlayingClassicKey] = on } }
 
+    // The key keeps the name from when this was only for the classic layout.
+    private val flowBackgroundKey = booleanPreferencesKey("now_playing_classic_flow")
+
+    /**
+     * The animated Apple Music style background (the cover's colours flowing): behind the whole classic Now Playing, and behind the lyrics and
+     * queue panels of the full-screen one. Off by default.
+     */
+    val flowBackground: Flow<Boolean> = context.settingsDataStore.data.map { it[flowBackgroundKey] ?: false }
+
+    suspend fun setFlowBackground(on: Boolean) { context.settingsDataStore.edit { it[flowBackgroundKey] = on } }
+
     private val classicCoverRadiusKey = intPreferencesKey("now_playing_classic_cover_radius")
 
     /** Corner radius (dp) of the classic Now Playing cover. */

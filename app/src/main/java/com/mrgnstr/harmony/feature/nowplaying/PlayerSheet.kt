@@ -192,6 +192,9 @@ private const val PrewarmAhead = 3
 private val ClassicArtMargin = 28.dp
 private val ClassicArtGap = 16.dp
 
+/** Elevation of the classic cover's shadow. */
+private val ClassicCoverShadow = 24.dp
+
 /** Themes the full player with the cover-seeded [scheme] in the classic layout (null: as it is). */
 @Composable
 private fun ClassicTheme(scheme: androidx.compose.material3.ColorScheme?, content: @Composable () -> Unit) {
@@ -205,6 +208,21 @@ private fun ClassicTheme(scheme: androidx.compose.material3.ColorScheme?, conten
             content = content,
         )
     }
+}
+
+/** The flow background of one song's cover (see core/designsystem/flow): 300 px cover, a start mesh from the song id, 15 fps on the LOW tier. */
+@Composable
+private fun SongFlowBackground(songId: Long, albumId: Long, dark: Boolean, lowTier: Boolean, modifier: Modifier, idle: Boolean = false) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Apple shrinks the artwork to a 300 px long edge before using it.
+    val cover by produceState<android.graphics.Bitmap?>(null, songId, albumId) {
+        value = com.mrgnstr.harmony.core.artwork.ArtworkDecoder.decodeAsync(context, songId, albumId, 300)
+    }
+    // Each song starts on its own mesh (the same one every time), then wanders on through the others.
+    val startMesh = intArrayOf(0, 1, 2, 4)[Math.floorMod(songId.hashCode(), 4)]
+    com.mrgnstr.harmony.core.designsystem.flow.FlowBackground(
+        cover, modifier, com.mrgnstr.harmony.core.designsystem.flow.FlowParams(dark = dark, mesh = startMesh), fps = if (idle) 4 else if (lowTier) 15 else 30,
+    )
 }
 
 @Composable
@@ -240,15 +258,21 @@ fun PlayerSheet(
     val alwaysDark = viewModel.alwaysDark.collectAsStateWithLifecycle().value
     val classic = viewModel.classicLayout.collectAsStateWithLifecycle().value && schemes != null
     val classicRadius = viewModel.classicCoverRadius.collectAsStateWithLifecycle().value.dp
+    val flowSetting = viewModel.flowBackground.collectAsStateWithLifecycle().value
+    // Classic: the animated background keeps the cover layout but takes the main mode's controls (light, over the flow), not the Material scheme.
+    val flowBackground = classic && flowSetting
+    // Full screen: the lyrics and queue panels get it in place of the blurred cover (the cover view itself is the main mode's own); the blur around the cover
+    // is cropped into the cover as the panel opens, as it is when the player opens from the mini player.
+    val panelFlow = !classic && flowSetting
     val seed = viewModel.accentSeed.collectAsStateWithLifecycle().value
     // The album page's own scheme for this cover (same seed, same palette rules), settling like a page does.
-    val classicScheme = if (classic && schemes != null) {
+    val classicScheme = if (classic && !flowBackground && schemes != null) {
         com.mrgnstr.harmony.core.designsystem.theme.animateColorScheme(
             schemes.scheme(seed?.let { com.mrgnstr.harmony.core.designsystem.theme.ColorSource.Seed(it) } ?: com.mrgnstr.harmony.core.designsystem.theme.ColorSource.Wallpaper, dark),
             snap = false, lowTier = LocalVisualTier.current == VisualTier.LOW,
         )
     } else null
-    val vmColors = (if (alwaysDark) viewModel.darkCoverColors else viewModel.coverColors).collectAsStateWithLifecycle().value
+    val vmColors = (if (alwaysDark || flowBackground) viewModel.darkCoverColors else viewModel.coverColors).collectAsStateWithLifecycle().value
     // Over the darkened, blurred lyrics background the dark controls of a bright cover would not be seen: they turn light.
     val darkened = animateCoverColors(if (panel.panel != NowPlayingPanel.None && vmColors.scrim < 0.01f) DefaultCoverColors else vmColors)
     val coverColors = if (classicScheme != null) remember(classicScheme) { classicCoverColors(classicScheme) } else darkened
@@ -438,6 +462,35 @@ fun PlayerSheet(
         // The scene fades as it is cropped; slower in a panel, where it is the whole screen going into the pill.
         val sceneAlpha: () -> Float = { fade(clamped() / lerp(0.15f, 0.6f, panel.open.value)) }
 
+        // The scene (blur around the cover) when the animated background replaces its panel blur. As on the way from the mini player, it rides on
+        // the cover (same scale and place, now going to the header) and is clipped to the cover plus however much of the screen is open, which
+        // closes with the panel: the blur is cropped into the cover and gone, with the flow underneath coming into view, instead of being blurred
+        // and scaled up as a background. It never fades here: only the crop takes it away.
+        val ridingPanelFlow: GraphicsLayerScope.() -> Unit = {
+            val p = clamped()
+            val q = panel.q()
+            val o = p * (1f - q)
+            val s0 = lerp(miniArt / fullArt, 1f, p)
+            val s = lerp(s0, lerp(miniArt, headerSize, p) / fullArt, q)
+            transformOrigin = TransformOrigin(0f, fullArtY / screenH)
+            scaleX = s; scaleY = s
+            translationX = lerp(coverLeft(p), lerp(miniArtX, headerX, p), q) - s * artX
+            translationY = lerp(coverTop(p), lerp(miniArtY, headerY, p), q) - fullArtY + sag()
+            // The cover's own radius (as placeCover has it) when closed to it, the display's at each corner when open.
+            val coverR = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q)
+            // The device's reported corners as they are (not eased to square like a settled sheet's): the crop starts at the screen's own corners.
+            fun r(display: Float) = CornerRadius(lerp(coverR, display, o) / s)
+            shape = RectShape(
+                RoundRect(
+                    left = artX * (1f - o), top = fullArtY * (1f - o),
+                    right = artX + fullArt + o * (screenW - artX - fullArt), bottom = fullArtY + fullArt + o * (screenH - fullArtY - fullArt),
+                    topLeftCornerRadius = r(corners.tl), topRightCornerRadius = r(corners.tr),
+                    bottomRightCornerRadius = r(corners.br), bottomLeftCornerRadius = r(corners.bl),
+                ),
+            )
+            clip = true
+        }
+
         val drag = rememberDraggableState { delta ->
             // Having pulled the player up at any point in this drag rules the swipe-away out, however it ends.
             if (state.progress.value > 0.02f) fromRest.value = false
@@ -484,6 +537,20 @@ fun PlayerSheet(
             if (classicScheme != null) {
                 Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade(clamped() / 0.3f) }.background(classicScheme.surfaceContainer))
             }
+            // Classic with the flow: the page's own surface (a menu's colour; nearly black in a dark theme) with the flow over it, as ONE group
+            // that fades as the plain classic surface does. They must fade together: faded one after the other, the dark surface showed on its own
+            // for a while. The flow only runs while the player is open (it renders on a background thread).
+            if (flowBackground && showFull) {
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        alpha = fade(clamped() / 0.3f)
+                        compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    },
+                ) {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer))
+                    SongFlowBackground(songId, snap.albumId, dark, lowTier, Modifier.fillMaxSize())
+                }
+            }
             // Under the whole scene (cover, blur, controls); taps reach it because the scene is cropped to the cover while collapsed.
             if (showMini) {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
@@ -525,8 +592,20 @@ fun PlayerSheet(
             // Solid ground under the scene, cropped and grown like it: the blur layers are bitmaps or a shader that can end a pixel or
             // two short of the screen edge, and the page behind must never show through there.
             if (!classic) Box(
-                Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() }.background(Color.Black),
+                // With the flow the black is only for the cover view: in a panel the flow is the ground, and black under it would show through
+                // while both fade out together on the way to the mini player.
+                Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = sceneAlpha() * (if (panelFlow) 1f - fade(panel.q() / 0.1f) else 1f) }.background(Color.Black),
             )
+
+            // The animated background of a panel, under the scene: the scene's blur is cropped away over it (see [ridingPanelFlow]). It is opaque
+            // from the first moment of the panel (hidden behind the scene until the crop reveals it, so nothing dark shows in between), and
+            // already running, slowly, while only the cover shows, so its first frame is ready.
+            if (panelFlow && showFull) {
+                // Fading with the scene on the way to the mini player (sceneAlpha), so it goes into the pill with everything else.
+                Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(panel.q() / 0.03f) * sceneAlpha() }) {
+                    SongFlowBackground(songId, snap.albumId, dark, lowTier, Modifier.fillMaxSize(), idle = !panel.visible)
+                }
+            }
 
             // Where the cover is: the mini player's thumbnail grows into the full-width picture, or, in a panel, goes to the header.
             // Two covers share this, the one here and the panel's (composed with the full player, further up), and take over from
@@ -545,6 +624,13 @@ fun PlayerSheet(
                 val radius = lerp(lerp(MiniArtRadius.toPx(), if (classic) classicRadius.toPx() else 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q) / s
                 shape = RectShape(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
                 clip = true
+                if (classic) {
+                    // A slight shadow on all four sides: mostly the ambient one (even all round), a little spot one below. It is there
+                    // while the cover is big, and gone in the mini player and the lyrics header (small covers).
+                    shadowElevation = ClassicCoverShadow.toPx() * p * (1f - q)
+                    ambientShadowColor = Color.Black
+                    spotShadowColor = Color.Black.copy(alpha = 0.5f)
+                }
             }
             CoverBox(
                 cover,
@@ -579,17 +665,19 @@ fun PlayerSheet(
                 }
             }
 
+            // With the flow the scene is cropped away entirely by the time the panel has settled: nothing to draw (or blur) then.
+            val sceneShown by remember { derivedStateOf { !panelFlow || panel.q() < 0.98f } }
             // The blur around the cover, drawn over it: it fades into the picture's own edge rows. In a panel it is the background:
             // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid up.
             if (!classic) Box(
-                Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer {
+                Modifier.fillMaxSize().graphicsLayer(if (panelFlow) ridingPanelFlow else riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
                     alpha = sceneAlpha()
                 }.then(if (lowTier) Modifier else Modifier.dither()),
             ) {
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
-                        val q = panel.q()
+                        val q = if (panelFlow) 0f else panel.q()
                         val grow = lerp(1f, 1.3f, q)
                         scaleX = grow; scaleY = grow
                         translationY = -q * 0.05f * screenH
@@ -600,13 +688,13 @@ fun PlayerSheet(
                         }
                     },
                 ) {
-                    if (panel.visible) {
+                    if (panel.visible && !panelFlow) {
                         CoverBox(
                             cover,
                             Modifier.offset { IntOffset(0, fullArtY.roundToInt()) }.size(with(density) { fullArt.toDp() }),
                         )
                     }
-                    if (showFull) {
+                    if (showFull && sceneShown) {
                         CoverExtension(
                             songId = songId, albumId = snap.albumId, cover = cover,
                             coverTopPx = fullArtY, coverSizePx = fullArt, load = viewModel::coverStrips, ready = viewModel::coverStripsIfReady,
@@ -614,7 +702,7 @@ fun PlayerSheet(
                         sceneScrim()
                     }
                 }
-                if (panel.visible) {
+                if (panel.visible && !panelFlow) {
                     if (!liveBlur) {
                         // No live blur: the small pre-blurred cover, stretched over everything.
                         val diffused by produceState(viewModel.diffusedCoverIfReady(songId, snap.albumId)?.asImageBitmap(), songId, snap.albumId) {
@@ -666,17 +754,26 @@ fun PlayerSheet(
                 // The scene is blurred as one in a panel, so its progressive blur is gone there; and the panel's cover lies over the
                 // strips' fade into it, which would only appear (snap in) when the panel is gone. So the same strips and darkening,
                 // unblurred, moving with the scene, are drawn over the cover and fade out as the panel opens and back in as it closes.
-                val stripsOverlay by remember { derivedStateOf { !classic && liveBlur && panel.visible && panel.q() < StripsFadeEnd + 0.05f } }
+                // With the flow it stays until the cover has all but arrived at the header (it goes with the crop, below).
+                val stripsOverlay by remember { derivedStateOf { !classic && liveBlur && panel.visible && panel.q() < (if (panelFlow) 0.98f else StripsFadeEnd + 0.05f) } }
                 if (stripsOverlay) {
-                    Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(clamped() / 0.15f) }) {
+                    Box(
+                        Modifier.fillMaxSize().graphicsLayer(if (panelFlow) ridingPanelFlow else riding).graphicsLayer {
+                            // With the flow: cropped into the cover like the scene, and, as in the mini player, faded only over the last stretch,
+                            // where little but a rim would be left on the header cover.
+                            alpha = fade(clamped() / 0.15f) * (if (panelFlow) fade((1f - panel.q()) / 0.15f) else 1f)
+                        },
+                    ) {
                         Box(
                             Modifier.fillMaxSize().graphicsLayer {
-                                val q = panel.q()
-                                val grow = lerp(1f, 1.3f, q)
-                                scaleX = grow; scaleY = grow
-                                translationY = -q * 0.05f * screenH
-                                val t = (q / StripsFadeEnd).coerceIn(0f, 1f)
-                                alpha = 1f - t * t * (3f - 2f * t)
+                                if (!panelFlow) {
+                                    val q = panel.q()
+                                    val grow = lerp(1f, 1.3f, q)
+                                    scaleX = grow; scaleY = grow
+                                    translationY = -q * 0.05f * screenH
+                                    val t = (q / StripsFadeEnd).coerceIn(0f, 1f)
+                                    alpha = 1f - t * t * (3f - 2f * t)
+                                }
                             },
                         ) {
                             CoverExtension(

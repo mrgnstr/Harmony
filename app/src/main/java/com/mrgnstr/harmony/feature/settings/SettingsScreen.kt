@@ -140,6 +140,9 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 15)
     fun setClassicCoverRadius(dp: Int) { viewModelScope.launch { settings.setClassicCoverRadius(dp) } }
     fun setClassicNowPlaying(on: Boolean) { viewModelScope.launch { settings.setNowPlayingClassic(on) } }
+    val flowBackground: StateFlow<Boolean> = settings.flowBackground
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    fun setFlowBackground(on: Boolean) { viewModelScope.launch { settings.setFlowBackground(on) } }
     fun setMinimumDuration(ms: Long) { viewModelScope.launch { settings.setMinimumDuration(ms) } }
     fun setFolderExcluded(path: String, excluded: Boolean) { viewModelScope.launch { settings.setFolderExcluded(path, excluded) } }
     suspend fun localMusicFolders(): List<String> = runCatching { scanner.musicFolders() }.getOrDefault(emptyList())
@@ -238,6 +241,7 @@ fun SettingsRoute(
     val alwaysDark by viewModel.alwaysDark.collectAsStateWithLifecycle()
     val classicNowPlaying by viewModel.classicNowPlaying.collectAsStateWithLifecycle()
     val classicCoverRadius by viewModel.classicCoverRadius.collectAsStateWithLifecycle()
+    val flowBackground by viewModel.flowBackground.collectAsStateWithLifecycle()
     val collapseBars by viewModel.collapseBars.collectAsStateWithLifecycle()
     val showAudioInfo by viewModel.showAudioInfo.collectAsStateWithLifecycle()
     val libraryFilters by viewModel.libraryFilters.collectAsStateWithLifecycle()
@@ -751,6 +755,12 @@ fun SettingsRoute(
                             )
                         }
                     }
+                    SwitchSettingRow(
+                        title = "Animated Background",
+                        subtitle = "The cover's colours flowing behind the lyrics and queue, and behind the whole classic screen, like Apple Music",
+                        checked = flowBackground,
+                        onCheckedChange = viewModel::setFlowBackground,
+                    )
                     SwitchSettingRow(
                         title = "Always Dark Now Playing",
                         subtitle = "Always light controls and a dimmed bottom, even on bright covers",
