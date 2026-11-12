@@ -35,7 +35,7 @@ private const val RenderWidth = 128
 
 /**
  * The animated Apple-Music-style background of [cover] (see [FlowRenderer]). Changing [cover] crossfades over 500 ms like Apple's own.
- * Drawn on a background thread at [fps]; the cover should be at most ~300 px on its long side.
+ * Drawn on a background thread at [fps] (0: a single frame); the cover should be at most ~300 px on its long side.
  */
 @Composable
 fun FlowBackground(
@@ -66,6 +66,13 @@ private fun FlowLayer(art: Bitmap, size: IntSize, params: FlowParams, fps: Int) 
     }
     var tick by remember(renderer) { mutableIntStateOf(0) }
     LaunchedEffect(renderer, fps) {
+        if (fps <= 0) {
+            // Idle: one frame, so there is something to show when it is needed, and no redraws of the window until then.
+            val p = current
+            withContext(Dispatchers.Default) { renderer.render(System.nanoTime() / 1e9, p) }
+            tick++
+            return@LaunchedEffect
+        }
         val frameNs = 1_000_000_000L / fps
         var last = 0L
         while (isActive) {

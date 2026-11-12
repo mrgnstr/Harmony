@@ -221,7 +221,7 @@ private fun SongFlowBackground(songId: Long, albumId: Long, dark: Boolean, lowTi
     // Each song starts on its own mesh (the same one every time), then wanders on through the others.
     val startMesh = intArrayOf(0, 1, 2, 4)[Math.floorMod(songId.hashCode(), 4)]
     com.mrgnstr.harmony.core.designsystem.flow.FlowBackground(
-        cover, modifier, com.mrgnstr.harmony.core.designsystem.flow.FlowParams(dark = dark, mesh = startMesh), fps = if (idle) 4 else if (lowTier) 15 else 30,
+        cover, modifier, com.mrgnstr.harmony.core.designsystem.flow.FlowParams(dark = dark, mesh = startMesh), fps = if (idle) 0 else if (lowTier) 15 else 30,
     )
 }
 
@@ -468,8 +468,9 @@ fun PlayerSheet(
         // and scaled up as a background. It never fades here: only the crop takes it away.
         val ridingPanelFlow: GraphicsLayerScope.() -> Unit = {
             val p = clamped()
-            val q = panel.q()
-            val o = p * (1f - q)
+            // The panel's spring can overshoot: an open share or a radius below 0 would make an inverted rect and a negative radius.
+            val q = panel.q().coerceIn(0f, 1f)
+            val o = (p * (1f - q)).coerceIn(0f, 1f)
             val s0 = lerp(miniArt / fullArt, 1f, p)
             val s = lerp(s0, lerp(miniArt, headerSize, p) / fullArt, q)
             transformOrigin = TransformOrigin(0f, fullArtY / screenH)
@@ -479,7 +480,7 @@ fun PlayerSheet(
             // The cover's own radius (as placeCover has it) when closed to it, the display's at each corner when open.
             val coverR = lerp(lerp(MiniArtRadius.toPx(), 0f, p), lerp(MiniArtRadius.toPx(), PanelCoverRadius.toPx(), p), q)
             // The device's reported corners as they are (not eased to square like a settled sheet's): the crop starts at the screen's own corners.
-            fun r(display: Float) = CornerRadius(lerp(coverR, display, o) / s)
+            fun r(display: Float) = CornerRadius((lerp(coverR, display, o) / s).coerceAtLeast(0f))
             shape = RectShape(
                 RoundRect(
                     left = artX * (1f - o), top = fullArtY * (1f - o),
@@ -599,7 +600,7 @@ fun PlayerSheet(
 
             // The animated background of a panel, under the scene: the scene's blur is cropped away over it (see [ridingPanelFlow]). It is opaque
             // from the first moment of the panel (hidden behind the scene until the crop reveals it, so nothing dark shows in between), and
-            // already running, slowly, while only the cover shows, so its first frame is ready.
+            // already holding its first frame while only the cover shows (one frame, no redraws), so it is ready.
             if (panelFlow && showFull) {
                 // Fading with the scene on the way to the mini player (sceneAlpha), so it goes into the pill with everything else.
                 Box(Modifier.fillMaxSize().graphicsLayer(riding).graphicsLayer { alpha = fade(panel.q() / 0.03f) * sceneAlpha() }) {

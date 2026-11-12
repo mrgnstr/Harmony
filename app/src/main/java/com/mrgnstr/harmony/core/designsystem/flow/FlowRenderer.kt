@@ -90,7 +90,7 @@ internal class FlowMeshData private constructor(
 
 /**
  * One background for one cover at one target size ([width] x [height] is the small render size; [fullWidth] x [fullHeight] the size
- * it will be shown at, which only sets the blur). Not thread safe: call [render] from one thread; [front] is what to draw.
+ * it will be shown at, which only sets the blur). [render] is synchronized (renders never overlap); [front] is what to draw.
  */
 internal class FlowRenderer(
     private val meshes: FlowMeshData,
@@ -104,11 +104,13 @@ internal class FlowRenderer(
     private val rotationCanvas = Canvas(rotation)
     private val blurred = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     private val pixels = IntArray(width * height)
-    private val buffers = Array(2) { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }
-    private var next = 0
+    // Private to the render thread: the mesh is drawn here and graded. What is shown ([front]) is always a NEW bitmap made from the result:
+    // the screen draws a bitmap a frame or two after it was handed over (the render thread records it, the GPU reads it later), so reusing
+    // two bitmaps let the next frame be cleared and half drawn while the GPU still read the last one, which flashed black and partial frames.
+    private val work = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
 
     /** The last finished frame. */
-    @Volatile var front: Bitmap = buffers[1]
+    @Volatile var front: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         private set
 
     private val artPaint = Paint().apply { isFilterBitmap = false }
@@ -138,7 +140,10 @@ internal class FlowRenderer(
         for (i in texs.indices) texs[i] = ((meshes.uv[i] - 0.5f) * squeeze + 0.5f) * (if (i % 2 == 0) width else height)
     }
 
-    /** Draws the frame for [time] seconds into the back buffer and publishes it as [front]. */
+    /** Draws the frame for [time] seconds and publishes it as [front] (a new bitmap each time). */
+    // Synchronized: a cancelled loop's render keeps running to its end while the next loop (a new fps, say) starts another, and two renders
+    // on one set of bitmaps and arrays garble each other.
+    @Synchronized
     fun render(time: Double, params: FlowParams) {
         applyScale(params.scale)
         spin(time, params)
@@ -146,11 +151,9 @@ internal class FlowRenderer(
         StackBlur.blur(pixels, width, height, blurRadius)
         blurred.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        val out = buffers[next]
-        warp(out, time, params)
-        grade(out, params)
-        front = out
-        next = 1 - next
+        warp(work, time, params)
+        grade(work, params)
+        front = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     }
 
     private fun spin(time: Double, params: FlowParams) {
@@ -235,7 +238,6 @@ internal class FlowRenderer(
                 (((l + saturation * (b - l)) * scale + offset).coerceIn(Floor, Top) * 255f + 0.5f).toInt(),
             )
         }
-        out.setPixels(pixels, 0, width, 0, 0, width, height)
     }
 
     private companion object {
