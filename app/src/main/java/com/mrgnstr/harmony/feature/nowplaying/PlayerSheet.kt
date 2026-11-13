@@ -670,7 +670,9 @@ fun PlayerSheet(
             val sceneShown by remember { derivedStateOf { !panelFlow || panel.q() < 0.98f } }
             // The blur around the cover, drawn over it: it fades into the picture's own edge rows. In a panel it is the background:
             // the whole scene (a copy of the cover under the blur around it) is blurred, scaled up and slid up.
-            if (!classic) Box(
+            // With the flow it is not composed at all once cropped away: left in, this empty node and its dither shader were redrawn with every frame of the
+            // flow and the Xiaomi 11T (Mali-G77) then showed stale frames (the lyrics opening replaying its end).
+            if (!classic && sceneShown) Box(
                 Modifier.fillMaxSize().graphicsLayer(if (panelFlow) ridingPanelFlow else riding).graphicsLayer {
                     // At rest in the mini player only a faint rim would show inside the thumbnail, so it fades out over the last stretch.
                     alpha = sceneAlpha()
