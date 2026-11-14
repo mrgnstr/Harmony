@@ -35,7 +35,7 @@ class FavouritesTest {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(ctx, HarmonyDatabase::class.java).build()
         favourites = FavouritesRepository(db.favouritesDao(), scope)
-        playlists = PlaylistRepository(db, db.playlistDao(), PlaylistCoverStore(ctx), favourites)
+        playlists = PlaylistRepository(db, db.playlistDao(), PlaylistCoverStore(ctx), favourites, testNavidromeRepository(ctx, db, scope))
     }
 
     @After fun tearDown() = db.close()

@@ -51,8 +51,8 @@ class QueueDaoTest {
     @Test fun stateIsASingleUpsertedRow() = runBlocking {
         val dao = db.queueDao()
         assertNull(dao.state())
-        dao.saveState(QueueStateEntity(currentIndex = 2, positionMs = 1234, repeatMode = 1, shuffled = true, source = "Songs", updatedAtMs = 1))
-        dao.saveState(QueueStateEntity(currentIndex = 3, positionMs = 5, repeatMode = 0, shuffled = false, source = null, updatedAtMs = 2))
+        dao.saveState(QueueStateEntity(currentIndex = 2, positionMs = 1234, repeatMode = 1, shuffled = true, source = "Songs", sourceKind = null, updatedAtMs = 1))
+        dao.saveState(QueueStateEntity(currentIndex = 3, positionMs = 5, repeatMode = 0, shuffled = false, source = null, sourceKind = null, updatedAtMs = 2))
         val s = dao.state()!!
         assertEquals(3, s.currentIndex)
         assertNull(s.source)

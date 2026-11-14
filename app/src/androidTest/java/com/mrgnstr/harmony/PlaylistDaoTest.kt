@@ -29,6 +29,7 @@ class PlaylistDaoTest {
         repo = PlaylistRepository(
             db, db.playlistDao(), PlaylistCoverStore(ctx),
             FavouritesRepository(db.favouritesDao(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())),
+            testNavidromeRepository(ctx, db, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())),
         )
     }
 

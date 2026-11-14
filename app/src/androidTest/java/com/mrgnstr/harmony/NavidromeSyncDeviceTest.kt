@@ -8,6 +8,7 @@ import com.mrgnstr.harmony.core.artwork.ArtworkColorStore
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.database.HarmonyDatabase
 import com.mrgnstr.harmony.core.datastore.SettingsStore
+import com.mrgnstr.harmony.core.device.NetworkMonitor
 import com.mrgnstr.harmony.core.model.AuthMethod
 import com.mrgnstr.harmony.core.model.RemoteIds
 import com.mrgnstr.harmony.core.model.SearchQuery
@@ -147,6 +148,7 @@ class NavidromeSyncDeviceTest {
             transcodeNegotiator = negotiator,
             colorStore = colorStore,
             settings = settings,
+            network = NetworkMonitor(ctx),
             scope = scope,
         )
 
