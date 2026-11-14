@@ -16,6 +16,8 @@ internal class HistoryRecorder(
     private val player: Player,
     private val dao: HistoryDao,
     writeScope: CoroutineScope,
+    /** True while the queue is changed without a song having been played (a stream swapped for its download). */
+    private val isMuted: () -> Boolean = { false },
     private val onScrobble: (suspend (songId: Long, playedAtMs: Long) -> Unit)? = null,
 ) {
     /** One consumer, so plays are written in the order they happened. */
@@ -23,6 +25,7 @@ internal class HistoryRecorder(
 
     private val listener = object : Player.Listener {
         override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+            if (isMuted()) return
             val left = old.mediaItem ?: return
             when (reason) {
                 // Repeat-one loops the same song: that is a finished play as well.

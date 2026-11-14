@@ -25,6 +25,7 @@ import com.mrgnstr.harmony.core.common.ApplicationScope
 import com.mrgnstr.harmony.core.data.NavidromeRepository
 import com.mrgnstr.harmony.core.database.HistoryDao
 import com.mrgnstr.harmony.core.database.QueueDao
+import com.mrgnstr.harmony.core.database.toModel
 import com.mrgnstr.harmony.core.datastore.SettingsStore
 import com.mrgnstr.harmony.core.model.ReplayGainMode
 import dagger.hilt.android.AndroidEntryPoint
@@ -49,11 +50,14 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var navidrome: NavidromeRepository
     @Inject lateinit var settings: SettingsStore
     @Inject lateinit var transcodePolicy: com.mrgnstr.harmony.core.data.TranscodePolicy
+    @Inject lateinit var songDao: com.mrgnstr.harmony.core.database.SongDao
+    @Inject lateinit var network: com.mrgnstr.harmony.core.device.NetworkMonitor
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private var session: MediaSession? = null
     private var persister: QueuePersister? = null
     private var history: HistoryRecorder? = null
+    private var recovery: ConnectionRecovery? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     /** The saved queue has been (or is being) loaded into the player, by the launch restore or by [onPlaybackResumption]. */
     private var restoreHandled = false
@@ -118,7 +122,16 @@ class PlaybackService : MediaSessionService() {
         )
         livePlayer = player
         session = MediaSession.Builder(this, player).setBitmapLoader(RemoteCoverBitmapLoader(this)).setCallback(ResumptionCallback()).setSessionActivity(open).build()
-        history = HistoryRecorder(player, historyDao, appScope) { songId, playedAtMs ->
+        // A streamed song that has a download switches to the file when the connection goes, and a stopped stream resumes when it is back.
+        val recovery = ConnectionRecovery(
+            player, network.online, scope,
+            localCopy = { id ->
+                songDao.getById(id)?.toModel()
+                    ?.takeIf { it.isDownloaded && java.io.File(it.downloadedPath!!.removePrefix("file://")).exists() }
+                    ?.toMediaItem()
+            },
+        ).also { this.recovery = it; it.start() }
+        history = HistoryRecorder(player, historyDao, appScope, isMuted = { recovery.swapping }) { songId, playedAtMs ->
             navidrome.reportScrobble(songId, playedAtMs, submission = true)
         }
         val persister = QueuePersister(player, queueStore, queueDao, appScope).also { persister = it }
@@ -337,6 +350,8 @@ class PlaybackService : MediaSessionService() {
         persister = null
         history?.release()
         history = null
+        recovery?.release()
+        recovery = null
         scope.cancel()
         session?.run {
             player.release()
