@@ -3,7 +3,7 @@ package com.mrgnstr.harmony.core.designsystem.flow
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Rect
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -13,12 +13,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -34,7 +36,8 @@ import kotlinx.coroutines.withContext
 private const val RenderWidth = 128
 
 /**
- * The animated Apple-Music-style background of [cover] (see [FlowRenderer]). Changing [cover] crossfades over 500 ms like Apple's own.
+ * The animated Apple-Music-style background of [cover] (see [FlowRenderer]). A new [cover] fades in over the old one in 500 ms like Apple's own;
+ * the old one stays fully shown until then (also while [cover] is null, i.e. while the next one loads), so the background is never see-through.
  * Drawn on a background thread at [fps] (0: a single frame); the cover should be at most ~300 px on its long side.
  */
 @Composable
@@ -47,17 +50,32 @@ fun FlowBackground(
     background: Color = Color.Transparent,
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
+    // [shown] is fully opaque; [incoming] fades in over it, then takes its place.
+    var shown by remember { mutableStateOf<Bitmap?>(null) }
+    var incoming by remember { mutableStateOf<Bitmap?>(null) }
+    val fadeIn = remember { Animatable(1f) }
+    LaunchedEffect(cover) {
+        val next = cover ?: return@LaunchedEffect
+        if (next === shown) return@LaunchedEffect
+        if (shown == null) { shown = next; return@LaunchedEffect }
+        incoming = next
+        fadeIn.snapTo(0f)
+        fadeIn.animateTo(1f, tween(500))
+        shown = next
+        incoming = null
+    }
     Box(modifier.onSizeChanged { size = it }.background(background)) {
         if (size != IntSize.Zero) {
-            Crossfade(cover, animationSpec = tween(500), label = "flow cover") { art ->
-                if (art != null) FlowLayer(art, size, params, fps)
+            // Keyed by the bitmap, so the incoming layer keeps its renderer when it becomes the shown one.
+            for (art in listOfNotNull(shown, incoming)) {
+                key(art) { FlowLayer(art, size, params, fps, if (art === incoming) ({ fadeIn.value }) else null) }
             }
         }
     }
 }
 
 @Composable
-private fun FlowLayer(art: Bitmap, size: IntSize, params: FlowParams, fps: Int) {
+private fun FlowLayer(art: Bitmap, size: IntSize, params: FlowParams, fps: Int, fade: (() -> Float)?) {
     val context = LocalContext.current
     val current by rememberUpdatedState(params)
     val renderer = remember(art, size) {
@@ -87,7 +105,7 @@ private fun FlowLayer(art: Bitmap, size: IntSize, params: FlowParams, fps: Int) 
         }
     }
     val paint = remember { Paint(Paint.FILTER_BITMAP_FLAG) }
-    Canvas(Modifier.fillMaxSize().dither()) {
+    Canvas(Modifier.fillMaxSize().then(if (fade != null) Modifier.graphicsLayer { alpha = fade() } else Modifier).dither()) {
         tick // read: invalidates the draw when a frame is ready
         drawIntoCanvas { canvas ->
             canvas.nativeCanvas.drawBitmap(renderer.front, null, Rect(0, 0, this.size.width.toInt(), this.size.height.toInt()), paint)
