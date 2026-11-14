@@ -63,10 +63,14 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         // Streams of a remote song are asked for in the Wi-Fi / Mobile quality unless the song's format must stay as it is (see TranscodePolicy).
+        // Underneath, the stream cache (see StreamCache): the quality is resolved first, so it is part of the cache key. Streams of unknown
+        // length (converted ones, live radio) are never cached.
+        val cached = StreamCache.dataSourceFactory(StreamCache.get(this))
         val dataSources = androidx.media3.datasource.DefaultDataSource.Factory(
             this,
-            androidx.media3.datasource.ResolvingDataSource.Factory(androidx.media3.datasource.DefaultHttpDataSource.Factory()) { spec ->
-                val uri = spec.uri
+            androidx.media3.datasource.ResolvingDataSource.Factory(cached) { original ->
+                val uri = original.uri
+                val spec = StreamCache.skipIfLengthUnknown(original)
                 val id = uri.getQueryParameter("id")
                 if (uri.scheme?.startsWith("http") != true || uri.path?.endsWith("/rest/stream") != true || id == null ||
                     uri.getQueryParameter("maxBitRate") != null || uri.getQueryParameter("format") != null
