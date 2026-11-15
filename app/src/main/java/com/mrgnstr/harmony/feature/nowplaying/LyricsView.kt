@@ -800,9 +800,7 @@ private class VLine(val top: Float, val bottom: Float, val baseline: Float) {
     var floor = Float.NEGATIVE_INFINITY
 }
 /** One syllable (a cue): [text] without its trailing space. It grows and glows if it alone is held long enough. */
-/** The horizontal extent of one letter of a syllable (its blank chars left out). */
-private class LetterBox(val l: Float, val r: Float, val ci: Int) { val c = (l + r) / 2f }
-private class Word(val t0: Long, val t1: Long, val pieces: List<Pair<VLine, Piece>>, val text: String, val letterBoxes: List<LetterBox>) {
+private class Word(val t0: Long, val t1: Long, val pieces: List<Pair<VLine, Piece>>, val text: String) {
     val sung: Long = t1 - t0
     val letters: Int = text.count { it.isLetterOrDigit() }
     /** Held long enough (this syllable, not the word it is in), on one line. */
@@ -820,7 +818,6 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
         val cuePieces = ArrayList<Pair<VLine, Piece>>()
         // The cue's chars, grouped per visual line.
         val groups = ArrayList<Triple<Int, Float, Float>>()
-        val letterBoxes = ArrayList<LetterBox>()
         var i = loc.a
         while (i < loc.b) {
             val ln = layout.getLineForOffset(i)
@@ -829,7 +826,6 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
             while (i < loc.b && layout.getLineForOffset(i) == ln) {
                 val box = layout.getBoundingBox(i)
                 l = min(l, box.left); r = max(r, box.right)
-                if (!text[i].isWhitespace() && text[i] != WordJoiner && box.width >= 1f) letterBoxes += LetterBox(box.left, box.right, i)
                 i++
             }
             groups += Triple(ln, l, r)
@@ -845,7 +841,7 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
             vl.pieces += piece
             cuePieces += vl to piece
         }
-        words += Word(loc.t0, loc.t1, cuePieces, text.substring(loc.a, loc.b).trimEnd(), letterBoxes)
+        words += Word(loc.t0, loc.t1, cuePieces, text.substring(loc.a, loc.b).trimEnd())
     }
     val bounds = android.graphics.Rect()
     for ((ln, vl) in vlines) {
@@ -896,19 +892,6 @@ private fun glowOf(word: Word, t: Long): Float {
     val up = smooth(Math.pow(p.toDouble(), 0.6).toFloat())
     val after = if (t > word.t1) 1f - smooth((t - word.t1) / GlowSettleMs) else 1f
     return up * after * word.strength
-}
-
-/**
- * How far the letter centred at [cx] has grown: a smooth function of how far the sweep's edge ([edge], pushed on by [span] as
- * the syllable is sung, so the last letter gets there too) is past it. The size therefore eases in as the sweep reaches a letter
- * and neighbours differ gently, like a wave running along the word, instead of each letter starting on a timer. All letters
- * settle together after the syllable, as [glowOf] does.
- */
-private fun letterGrowOf(word: Word, t: Long, cx: Float, edge: Float, span: Float): Float {
-    val prog = ((t - word.t0).toFloat() / (word.t1 - word.t0).coerceAtLeast(1L)).coerceIn(0f, 1f)
-    val near = smooth((edge + span * prog - cx) / span)
-    val after = if (t > word.t1) 1f - smooth((t - word.t1) / GlowSettleMs) else 1f
-    return near * after * word.strength
 }
 
 /** The glow follows the sweep: strongest just behind its edge, trailing off behind it (the part not yet sung has none). */
@@ -1026,11 +1009,6 @@ private fun LyricText(
         android.graphics.Paint().apply { textSize = with(density) { size.toPx() }; typeface = android.graphics.Typeface.DEFAULT_BOLD }
     }
     val geo = remember(layout, placed) { layout?.let { buildGeo(it, shown, placed, inkPaint) } }
-    // A growing letter is drawn on its own (far cheaper than the whole line clipped to it): one-glyph layouts in the line's own
-    // style, set on the line's baseline.
-    val letterStyle = LocalTextStyle.current.merge(style)
-        .copy(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.None))
-    val letterLayouts = remember(shown, letterStyle) { HashMap<Int, TextLayoutResult>() }
     // The ones that glow at the same time need a layer each.
     val glowLayers = if (glow) listOf(rememberGraphicsLayer(), rememberGraphicsLayer()) else emptyList()
     val fade = with(density) { size.toPx() } * FadeEm
@@ -1105,65 +1083,26 @@ private fun LyricText(
                     val lift = liftPx * amount * riseOf(t, w.t0, w.t1)
                     val edge = edgeOf(vl, t, fade)
                     val brush = sweepBrush(edge, fade, false, g.width, ink)
-                    translate(top = -lift) {
-                        if (blurs && strength > 0.01f && layerIndex < glowLayers.size) {
-                            // The glow: a blurred copy of the lit part, behind it.
-                            val layer = glowLayers[layerIndex++]
-                            val r = (6.dp.toPx() + 10.dp.toPx() * strength)
-                            layer.renderEffect = BlurEffect(r, r, TileMode.Decal)
-                            layer.alpha = 0.9f * strength
-                            layer.record(this, layoutDirection, IntSize(l.size.width, l.size.height)) {
-                                clipRect(p.realL, vl.top, p.realR, vl.bottom) {
-                                    drawText(l, glowBrush(edge, fade, ink), alpha = litAlpha * amount)
+                    val scale = 1f + GlowGrowth * strength
+                    // The line's own glyphs (the same font and place as the rest of it), scaled about the syllable's bottom centre.
+                    withTransform({ scale(scale, scale, Offset((p.realL + p.realR) / 2f, vl.bottom)) }) {
+                        translate(top = -lift) {
+                            if (blurs && strength > 0.01f && layerIndex < glowLayers.size) {
+                                // The glow: a blurred copy of the lit part, behind it.
+                                val layer = glowLayers[layerIndex++]
+                                val r = (6.dp.toPx() + 10.dp.toPx() * strength)
+                                layer.renderEffect = BlurEffect(r, r, TileMode.Decal)
+                                layer.alpha = 0.9f * strength
+                                layer.record(this, layoutDirection, IntSize(l.size.width, l.size.height)) {
+                                    clipRect(p.realL, vl.top, p.realR, vl.bottom) {
+                                        drawText(l, glowBrush(edge, fade, ink), alpha = litAlpha * amount)
+                                    }
                                 }
+                                drawLayer(layer)
                             }
-                            drawLayer(layer)
-                        }
-                        // The line's own glyphs (the same font and place as the rest of it). While no letter is growing the syllable is
-                        // drawn as one; otherwise a letter at a time, each growing about its own bottom centre when the sweep reaches it
-                        // (the ones the sweep has not reached yet are still drawn together).
-                        val top = stripTop(vl, liftPx * 1.5f)
-                        val letters = w.letterBoxes
-                        val gEdge = fade * 1.8f
-                        val grows = FloatArray(letters.size) {
-                            (letterGrowOf(w, t, letters[it].c, edge, gEdge) * amount * play.value).coerceIn(0f, 1f)
-                        }
-                        if (grows.none { it > 0.002f }) {
-                            clipRect(p.realL, top, p.realR, vl.bottom) {
+                            clipRect(p.realL, stripTop(vl, liftPx * 1.5f), p.realR, vl.bottom) {
                                 drawText(l, ink, alpha = dim)
                                 drawText(l, brush, alpha = litAlpha * amount)
-                            }
-                        } else {
-                            var k = 0
-                            while (k < letters.size) {
-                                if (grows[k] <= 0.002f) {
-                                    var m = k
-                                    while (m + 1 < letters.size && grows[m + 1] <= 0.002f) m++
-                                    val from = if (k == 0) p.realL else letters[k].l
-                                    val to = if (m == letters.size - 1) p.realR else letters[m].r
-                                    clipRect(from, top, to, vl.bottom) {
-                                        drawText(l, ink, alpha = dim)
-                                        drawText(l, brush, alpha = litAlpha * amount)
-                                    }
-                                    k = m + 1
-                                    continue
-                                }
-                                val box = letters[k]
-                                val scale = 1f + GlowGrowth * grows[k]
-                                val glyph = letterLayouts.getOrPut(box.ci) { measurer.measure(shown[box.ci].toString(), letterStyle, softWrap = false) }
-                                val at = Offset(box.l, vl.baseline - glyph.firstBaseline)
-                                withTransform({ scale(scale, scale, Offset(box.c, vl.bottom)) }) {
-                                    // Fully lit: one solid draw; not reached by the sweep: only the dim one.
-                                    val solid = amount >= 0.999f && litAlpha >= 0.999f && box.r <= edge - fade
-                                    if (solid) drawText(glyph, ink, topLeft = at)
-                                    else {
-                                        drawText(glyph, ink, topLeft = at, alpha = dim)
-                                        if (box.l < edge) {
-                                            drawText(glyph, sweepBrush(edge - box.l, fade, false, glyph.size.width.toFloat(), ink), topLeft = at, alpha = litAlpha * amount)
-                                        }
-                                    }
-                                }
-                                k++
                             }
                         }
                     }
