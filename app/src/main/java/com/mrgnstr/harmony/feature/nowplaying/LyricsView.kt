@@ -27,7 +27,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -653,7 +657,7 @@ private fun LineItem(
             else line.pronunciationCues.ifEmpty { listOf(LyricWordCue(row.start, row.end, text = line.pronunciation)) }
             LyricText(
                 text = line.pronunciation, cues = if (synced) cues else emptyList(), litAmount = litAmount, play = play, pos = pos, lineEnd = row.end,
-                size = SubSize, lineHeight = SubLineHeight, align = align, dim = DimAlpha, litAlpha = 1f, glow = false,
+                size = SubSize, lineHeight = SubLineHeight, align = TextAlign.Start, dim = DimAlpha, litAlpha = 1f, glow = false,
             )
         }
         if (panel.showTranslation && !line.translation.isNullOrBlank()) {
@@ -766,6 +770,8 @@ private fun rubyOf(line: LyricLine, lineEnd: Long): List<String>? {
 }
 
 private const val WordJoiner = '\u2060'
+/** The text of a line as drawn: [display] has the spacing (inline placeholders of [inline]), [shown] is its plain string and [placed] the cues in it. */
+private class SpacedText(val display: AnnotatedString, val shown: String, val placed: List<Located>, val inline: Map<String, InlineTextContent> = emptyMap())
 
 /** [text] with a word joiner between the characters of each cue in [located] (not next to a space), and [located] moved to match. */
 private fun joinCues(text: String, located: List<Located>): Pair<String, List<Located>> {
@@ -788,9 +794,15 @@ private fun joinCues(text: String, located: List<Located>): Pair<String, List<Lo
 
 /** A cue's slice of one visual line, in sweep space (mirrored for right-to-left text), with the share of the cue's time it gets. */
 private class Piece(val l: Float, val r: Float, val t0: Long, val t1: Long, val realL: Float, val realR: Float)
-private class VLine(val top: Float, val bottom: Float) { val pieces = ArrayList<Piece>() }
+private class VLine(val top: Float, val bottom: Float, val baseline: Float) {
+    val pieces = ArrayList<Piece>()
+    /** Where the ink of the visual line above ends (its descenders): what is drawn for this line must not reach above it, or those glyph bottoms are drawn twice. */
+    var floor = Float.NEGATIVE_INFINITY
+}
 /** One syllable (a cue): [text] without its trailing space. It grows and glows if it alone is held long enough. */
-private class Word(val t0: Long, val t1: Long, val pieces: List<Pair<VLine, Piece>>, val text: String) {
+/** The horizontal extent of one letter of a syllable (its blank chars left out). */
+private class LetterBox(val l: Float, val r: Float, val ci: Int) { val c = (l + r) / 2f }
+private class Word(val t0: Long, val t1: Long, val pieces: List<Pair<VLine, Piece>>, val text: String, val letterBoxes: List<LetterBox>) {
     val sung: Long = t1 - t0
     val letters: Int = text.count { it.isLetterOrDigit() }
     /** Held long enough (this syllable, not the word it is in), on one line. */
@@ -799,7 +811,7 @@ private class Word(val t0: Long, val t1: Long, val pieces: List<Pair<VLine, Piec
 }
 private class Geo(val lines: List<VLine>, val words: List<Word>, val rtl: Boolean, val width: Float)
 
-private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Located>): Geo {
+private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Located>, ink: android.graphics.Paint): Geo {
     val width = layout.size.width.toFloat()
     val rtl = layout.getParagraphDirection(0) == ResolvedTextDirection.Rtl
     val vlines = LinkedHashMap<Int, VLine>()
@@ -808,6 +820,7 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
         val cuePieces = ArrayList<Pair<VLine, Piece>>()
         // The cue's chars, grouped per visual line.
         val groups = ArrayList<Triple<Int, Float, Float>>()
+        val letterBoxes = ArrayList<LetterBox>()
         var i = loc.a
         while (i < loc.b) {
             val ln = layout.getLineForOffset(i)
@@ -816,6 +829,7 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
             while (i < loc.b && layout.getLineForOffset(i) == ln) {
                 val box = layout.getBoundingBox(i)
                 l = min(l, box.left); r = max(r, box.right)
+                if (!text[i].isWhitespace() && text[i] != WordJoiner && box.width >= 1f) letterBoxes += LetterBox(box.left, box.right, i)
                 i++
             }
             groups += Triple(ln, l, r)
@@ -826,12 +840,22 @@ private fun buildGeo(layout: TextLayoutResult, text: String, located: List<Locat
             val t0 = loc.t0 + ((loc.t1 - loc.t0) * (acc / total)).toLong()
             acc += r - l
             val t1 = loc.t0 + ((loc.t1 - loc.t0) * (acc / total)).toLong()
-            val vl = vlines.getOrPut(ln) { VLine(layout.getLineTop(ln), layout.getLineBottom(ln)) }
+            val vl = vlines.getOrPut(ln) { VLine(layout.getLineTop(ln), layout.getLineBottom(ln), layout.getLineBaseline(ln)) }
             val piece = if (rtl) Piece(width - r, width - l, t0, t1, l, r) else Piece(l, r, t0, t1, l, r)
             vl.pieces += piece
             cuePieces += vl to piece
         }
-        words += Word(loc.t0, loc.t1, cuePieces, text.substring(loc.a, loc.b).trimEnd())
+        words += Word(loc.t0, loc.t1, cuePieces, text.substring(loc.a, loc.b).trimEnd(), letterBoxes)
+    }
+    val bounds = android.graphics.Rect()
+    for ((ln, vl) in vlines) {
+        if (ln == 0) continue
+        val a = layout.getLineStart(ln - 1)
+        val b = layout.getLineEnd(ln - 1, visibleEnd = true)
+        if (b > a) {
+            ink.getTextBounds(text, a, b, bounds)
+            vl.floor = layout.getLineBaseline(ln - 1) + max(bounds.bottom, 0)
+        }
     }
     return Geo(vlines.values.toList(), words, rtl, width)
 }
@@ -872,6 +896,19 @@ private fun glowOf(word: Word, t: Long): Float {
     val up = smooth(Math.pow(p.toDouble(), 0.6).toFloat())
     val after = if (t > word.t1) 1f - smooth((t - word.t1) / GlowSettleMs) else 1f
     return up * after * word.strength
+}
+
+/**
+ * How far the letter centred at [cx] has grown: a smooth function of how far the sweep's edge ([edge], pushed on by [span] as
+ * the syllable is sung, so the last letter gets there too) is past it. The size therefore eases in as the sweep reaches a letter
+ * and neighbours differ gently, like a wave running along the word, instead of each letter starting on a timer. All letters
+ * settle together after the syllable, as [glowOf] does.
+ */
+private fun letterGrowOf(word: Word, t: Long, cx: Float, edge: Float, span: Float): Float {
+    val prog = ((t - word.t0).toFloat() / (word.t1 - word.t0).coerceAtLeast(1L)).coerceIn(0f, 1f)
+    val near = smooth((edge + span * prog - cx) / span)
+    val after = if (t > word.t1) 1f - smooth((t - word.t1) / GlowSettleMs) else 1f
+    return near * after * word.strength
 }
 
 /** The glow follows the sweep: strongest just behind its edge, trailing off behind it (the part not yet sung has none). */
@@ -933,38 +970,72 @@ private fun LyricText(
         return
     }
     // With pronunciations a syllable must not be split over two lines (its pronunciation could not follow it): word joiners keep
-    // its characters together, and [placed] is [located] in the joined text.
-    val (shown, placed) = remember(text, located, rubyOn) { if (rubyOn) joinCues(text, located) else text to located }
-    var layout by remember(shown) { mutableStateOf<TextLayoutResult?>(null) }
-    val geo = remember(layout, placed) { layout?.let { buildGeo(it, shown, placed) } }
-    // The ones that glow at the same time need a layer each.
-    val glowLayers = if (glow) listOf(rememberGraphicsLayer(), rememberGraphicsLayer()) else emptyList()
+    // its characters together, and [joinedAt] is [located] in the joined text.
+    val (joined, joinedAt) = remember(text, located, rubyOn) { if (rubyOn) joinCues(text, located) else text to located }
     val density = LocalDensity.current
-    val fade = with(density) { size.toPx() } * FadeEm
-    val liftPx = with(density) { size.toPx() } * LiftEm
-    val blurs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val measurer = rememberTextMeasurer()
     val rubyStyle = TextStyle(fontSize = rubySize, fontWeight = FontWeight.Bold)
     val rubyLayouts = remember(ruby, rubyOn, density) {
         if (rubyOn) ruby!!.map { if (it.isEmpty()) null else measurer.measure(it, rubyStyle) } else emptyList()
     }
-    // A syllable narrower than its pronunciation is followed by the missing width (as letter spacing on its last char), so the
-    // pronunciations never run into each other.
-    val display = remember(shown, placed, rubyLayouts, style, density) {
-        if (!rubyOn) AnnotatedString(shown)
+    // A syllable narrower than its pronunciation is followed by the missing width, so the pronunciations never run into each
+    // other: an empty inline placeholder of exactly that width. (Letter spacing was tried: Android puts half of it before the
+    // glyph and the layout's positions of what follows drift from the drawn ones, so the pronunciations ended up under the
+    // wrong syllables; zero-width characters get none at all.) The word joiner under the placeholder keeps lines from breaking there.
+    val spaced = remember(joined, joinedAt, rubyLayouts, style, density) {
+        if (!rubyOn) SpacedText(AnnotatedString(joined), joined, joinedAt)
         else {
-            val plain = measurer.measure(shown, style, softWrap = false)
+            val plain = measurer.measure(joined, style, softWrap = false)
             val gap = with(density) { RubyGap.toPx() }
-            val b = AnnotatedString.Builder(shown)
-            for ((i, loc) in placed.withIndex()) {
-                val r = rubyLayouts.getOrNull(i) ?: continue
-                val w = plain.getBoundingBox(loc.b - 1).right - plain.getBoundingBox(loc.a).left
-                val extra = r.size.width + gap - w
-                if (extra > 0.5f) b.addStyle(SpanStyle(letterSpacing = with(density) { extra.toSp() }), loc.b - 1, loc.b)
+            val b = AnnotatedString.Builder()
+            val inline = HashMap<String, InlineTextContent>()
+            val moved = ArrayList<Located>(joinedAt.size)
+            var cursor = 0
+            for ((i, loc) in joinedAt.withIndex()) {
+                b.append(joined.substring(cursor, loc.a))
+                val a = b.length
+                var coreEnd = loc.b
+                while (coreEnd > loc.a + 1 && joined[coreEnd - 1].isWhitespace()) coreEnd--
+                b.append(joined.substring(loc.a, coreEnd))
+                val r = rubyLayouts.getOrNull(i)
+                if (r != null && loc.b < joined.length) {
+                    val w = plain.getBoundingBox(loc.b - 1).right - plain.getBoundingBox(loc.a).left
+                    val extra = r.size.width + gap - w
+                    if (extra > 0.5f) {
+                        val id = "g$i"
+                        b.appendInlineContent(id, WordJoiner.toString())
+                        inline[id] = InlineTextContent(
+                            Placeholder(with(density) { extra.toSp() }, 1.sp, PlaceholderVerticalAlign.Bottom),
+                        ) {}
+                    }
+                }
+                b.append(joined.substring(coreEnd, loc.b))
+                moved += Located(a, b.length, loc.t0, loc.t1, loc.wordEnd)
+                cursor = loc.b
             }
-            b.toAnnotatedString()
+            b.append(joined.substring(cursor))
+            val display = b.toAnnotatedString()
+            SpacedText(display, display.text, moved, inline)
         }
     }
+    val shown = spaced.shown
+    val placed = spaced.placed
+    val display = spaced.display
+    var layout by remember(shown) { mutableStateOf<TextLayoutResult?>(null) }
+    val inkPaint = remember(size, density) {
+        android.graphics.Paint().apply { textSize = with(density) { size.toPx() }; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+    }
+    val geo = remember(layout, placed) { layout?.let { buildGeo(it, shown, placed, inkPaint) } }
+    // A growing letter is drawn on its own (far cheaper than the whole line clipped to it): one-glyph layouts in the line's own
+    // style, set on the line's baseline.
+    val letterStyle = LocalTextStyle.current.merge(style)
+        .copy(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.None))
+    val letterLayouts = remember(shown, letterStyle) { HashMap<Int, TextLayoutResult>() }
+    // The ones that glow at the same time need a layer each.
+    val glowLayers = if (glow) listOf(rememberGraphicsLayer(), rememberGraphicsLayer()) else emptyList()
+    val fade = with(density) { size.toPx() } * FadeEm
+    val liftPx = with(density) { size.toPx() } * LiftEm
+    val blurs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     Text(
         display,
         modifier
@@ -979,8 +1050,8 @@ private fun LyricText(
                     for ((wi, w) in g.words.withIndex()) {
                         val r = rubyLayouts.getOrNull(wi) ?: continue
                         val (vl, p) = w.pieces[0]
-                        // Flush with the start of its syllable (its end, for the right-aligned second voice).
-                        val x = (if (align == TextAlign.End) p.realR - r.size.width else p.realL).coerceIn(0f, max(0f, g.width - r.size.width))
+                        // Flush with the start of its syllable, also on right-aligned duet lines.
+                        val x = p.realL.coerceIn(0f, max(0f, g.width - r.size.width))
                         val at = Offset(x, vl.bottom - rubyExtra.toPx())
                         if (!lit) drawText(r, ink, topLeft = at, alpha = dim)
                         else {
@@ -1031,35 +1102,75 @@ private fun LyricText(
                     val w = g.words[wi]
                     val (vl, p) = w.pieces[0]
                     val strength = (glowOf(w, t) * amount * play.value).coerceIn(0f, 1f)
-                    val scale = 1f + GlowGrowth * strength
                     val lift = liftPx * amount * riseOf(t, w.t0, w.t1)
                     val edge = edgeOf(vl, t, fade)
                     val brush = sweepBrush(edge, fade, false, g.width, ink)
-                    // The line's own glyphs (the same font and place as the rest of it), scaled about the syllable's bottom centre.
-                    withTransform({ scale(scale, scale, Offset((p.realL + p.realR) / 2f, vl.bottom)) }) {
-                        translate(top = -lift) {
-                            if (blurs && strength > 0.01f && layerIndex < glowLayers.size) {
-                                // The glow: a blurred copy of the lit part, behind it.
-                                val layer = glowLayers[layerIndex++]
-                                val r = (6.dp.toPx() + 10.dp.toPx() * strength)
-                                layer.renderEffect = BlurEffect(r, r, TileMode.Decal)
-                                layer.alpha = 0.9f * strength
-                                layer.record(this, layoutDirection, IntSize(l.size.width, l.size.height)) {
-                                    clipRect(p.realL, vl.top, p.realR, vl.bottom) {
-                                        drawText(l, glowBrush(edge, fade, ink), alpha = litAlpha * amount)
-                                    }
+                    translate(top = -lift) {
+                        if (blurs && strength > 0.01f && layerIndex < glowLayers.size) {
+                            // The glow: a blurred copy of the lit part, behind it.
+                            val layer = glowLayers[layerIndex++]
+                            val r = (6.dp.toPx() + 10.dp.toPx() * strength)
+                            layer.renderEffect = BlurEffect(r, r, TileMode.Decal)
+                            layer.alpha = 0.9f * strength
+                            layer.record(this, layoutDirection, IntSize(l.size.width, l.size.height)) {
+                                clipRect(p.realL, vl.top, p.realR, vl.bottom) {
+                                    drawText(l, glowBrush(edge, fade, ink), alpha = litAlpha * amount)
                                 }
-                                drawLayer(layer)
                             }
-                            clipRect(p.realL, vl.top - liftPx * 1.5f, p.realR, vl.bottom) {
+                            drawLayer(layer)
+                        }
+                        // The line's own glyphs (the same font and place as the rest of it). While no letter is growing the syllable is
+                        // drawn as one; otherwise a letter at a time, each growing about its own bottom centre when the sweep reaches it
+                        // (the ones the sweep has not reached yet are still drawn together).
+                        val top = stripTop(vl, liftPx * 1.5f)
+                        val letters = w.letterBoxes
+                        val gEdge = fade * 1.8f
+                        val grows = FloatArray(letters.size) {
+                            (letterGrowOf(w, t, letters[it].c, edge, gEdge) * amount * play.value).coerceIn(0f, 1f)
+                        }
+                        if (grows.none { it > 0.002f }) {
+                            clipRect(p.realL, top, p.realR, vl.bottom) {
                                 drawText(l, ink, alpha = dim)
                                 drawText(l, brush, alpha = litAlpha * amount)
+                            }
+                        } else {
+                            var k = 0
+                            while (k < letters.size) {
+                                if (grows[k] <= 0.002f) {
+                                    var m = k
+                                    while (m + 1 < letters.size && grows[m + 1] <= 0.002f) m++
+                                    val from = if (k == 0) p.realL else letters[k].l
+                                    val to = if (m == letters.size - 1) p.realR else letters[m].r
+                                    clipRect(from, top, to, vl.bottom) {
+                                        drawText(l, ink, alpha = dim)
+                                        drawText(l, brush, alpha = litAlpha * amount)
+                                    }
+                                    k = m + 1
+                                    continue
+                                }
+                                val box = letters[k]
+                                val scale = 1f + GlowGrowth * grows[k]
+                                val glyph = letterLayouts.getOrPut(box.ci) { measurer.measure(shown[box.ci].toString(), letterStyle, softWrap = false) }
+                                val at = Offset(box.l, vl.baseline - glyph.firstBaseline)
+                                withTransform({ scale(scale, scale, Offset(box.c, vl.bottom)) }) {
+                                    // Fully lit: one solid draw; not reached by the sweep: only the dim one.
+                                    val solid = amount >= 0.999f && litAlpha >= 0.999f && box.r <= edge - fade
+                                    if (solid) drawText(glyph, ink, topLeft = at)
+                                    else {
+                                        drawText(glyph, ink, topLeft = at, alpha = dim)
+                                        if (box.l < edge) {
+                                            drawText(glyph, sweepBrush(edge - box.l, fade, false, glyph.size.width.toFloat(), ink), topLeft = at, alpha = litAlpha * amount)
+                                        }
+                                    }
+                                }
+                                k++
                             }
                         }
                     }
                 }
             },
         style = style, color = ink.copy(alpha = dim),
+        inlineContent = spaced.inline,
         onTextLayout = { layout = it },
     )
 }
@@ -1068,8 +1179,11 @@ private fun LyricText(
 private fun DrawScope.clipLine(vl: VLine, g: Geo, from: Float, to: Float, extraTop: Float, block: DrawScope.() -> Unit) {
     val a = if (!g.rtl) from else g.width - to
     val b = if (!g.rtl) to else g.width - from
-    clipRect(a, vl.top - extraTop, b, vl.bottom, block = block)
+    clipRect(a, stripTop(vl, extraTop), b, vl.bottom, block = block)
 }
+
+/** The top of the clip of [vl] when it may reach [extra] above its line (for what rises), but never into the ink of the line above. */
+private fun stripTop(vl: VLine, extra: Float): Float = max(vl.top - extra, min(vl.floor, vl.top))
 
 /** This app's all-files access page (Android 11+); the general list where a device lacks the per-app page. */
 private fun openAllFilesAccess(context: Context) {
