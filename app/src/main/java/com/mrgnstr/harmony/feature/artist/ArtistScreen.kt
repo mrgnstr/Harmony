@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import com.mrgnstr.harmony.core.designsystem.motion.rememberTapInteractionSource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -141,19 +142,18 @@ fun ArtistRoute(
     }
 }
 
-/** Same expansion ratio and spring as M3 ButtonGroup, with the artist row's asymmetric space sharing. */
+/**
+ * Play grows like a M3 ButtonGroup button (same ratio and spring) and pushes the side buttons outwards. Those are circles, so they only
+ * change shape: widening one would stop it being a circle.
+ */
 @Composable
 private fun ArtistActions(onInfo: () -> Unit, onPlay: () -> Unit, onShuffle: () -> Unit, enabled: Boolean) {
-    val infoInteraction = remember { MutableInteractionSource() }
-    val playInteraction = remember { MutableInteractionSource() }
-    val shuffleInteraction = remember { MutableInteractionSource() }
-    val infoPressed by infoInteraction.collectIsPressedAsState()
+    val infoInteraction = rememberTapInteractionSource()
+    val playInteraction = rememberTapInteractionSource()
+    val shuffleInteraction = rememberTapInteractionSource()
     val playPressed by playInteraction.collectIsPressedAsState()
-    val shufflePressed by shuffleInteraction.collectIsPressedAsState()
     val motion = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    val infoExpansion = animateFloatAsState(if (infoPressed) 1f else 0f, motion, label = "artist-info-width")
     val playExpansion = animateFloatAsState(if (playPressed) 1f else 0f, motion, label = "artist-play-width")
-    val shuffleExpansion = animateFloatAsState(if (shufflePressed) 1f else 0f, motion, label = "artist-shuffle-width")
     Layout(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 28.dp),
         content = {
@@ -180,8 +180,8 @@ private fun ArtistActions(onInfo: () -> Unit, onPlay: () -> Unit, onShuffle: () 
         val restingPlay = (width - 2 * inset - 2 * side - 2 * gap).coerceAtLeast(0f)
         val ratio = ButtonGroupDefaults.ExpandedRatio
         val playExtra = (restingPlay * ratio * playExpansion.value).coerceIn(-2 * inset, 2 * inset)
-        val infoWidth = (side * (1f + ratio * infoExpansion.value)).roundToInt().coerceAtLeast(1)
-        val shuffleWidth = (side * (1f + ratio * shuffleExpansion.value)).roundToInt().coerceAtLeast(1)
+        val infoWidth = side.roundToInt()
+        val shuffleWidth = side.roundToInt()
         val infoX = (inset - playExtra / 2f).roundToInt()
         val shuffleX = width - infoX - shuffleWidth
         val playX = infoX + infoWidth + gap
@@ -226,7 +226,7 @@ private fun LatestRelease(album: Album, onOpen: () -> Unit, onPlay: () -> Unit) 
                     Text(album.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(listOfNotNull(album.year.takeIf { it > 0 }?.toString(), "${album.songCount} ${if (album.songCount == 1) "song" else "songs"}").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                FilledIconButton(onPlay, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(48.dp)) { SymbolIcon(Symbols.Play, "Play ${album.title}", fill = 1f) }
+                FilledIconButton(onPlay, interactionSource = rememberTapInteractionSource(), shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(48.dp)) { SymbolIcon(Symbols.Play, "Play ${album.title}", fill = 1f) }
             }
         }
         if (menuInitialized) {

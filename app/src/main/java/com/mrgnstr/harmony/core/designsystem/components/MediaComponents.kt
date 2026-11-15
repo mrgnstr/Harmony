@@ -28,6 +28,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import com.mrgnstr.harmony.core.designsystem.motion.rememberTapInteractionSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -283,7 +284,7 @@ fun SectionHeading(text: String, modifier: Modifier = Modifier, onMore: (() -> U
     ) {
         Text(text, Modifier.weight(1f).then(if (onMore != null) Modifier.clickable(onClick = onMore) else Modifier), style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (onMore != null) {
-            FilledTonalIconButton(onClick = onMore, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(36.dp)) {
+            FilledTonalIconButton(onClick = onMore, interactionSource = rememberTapInteractionSource(), shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(36.dp)) {
                 SymbolIcon(Symbols.ChevronRight, "See all $text", size = 20.dp)
             }
         }

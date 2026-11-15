@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenuItem
+import com.mrgnstr.harmony.core.designsystem.motion.rememberTapInteractionSource
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.layout.boundsInRoot
@@ -57,8 +58,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilledTonalIconToggleButton
@@ -170,23 +173,38 @@ internal fun FullPlayerControls(
         // Transport
         val prevKick = rememberSkipKick(next = false)
         val nextKick = rememberSkipKick(next = true)
+        // As in the album's ButtonGroup, a pressed skip button widens by ButtonGroupDefaults.ExpandedRatio with the fast spatial spring, but
+        // outwards only: Play is a circle, so it neither widens nor moves (the group's fixed-size children would not widen at all).
+        val prevInteraction = rememberTapInteractionSource()
+        val nextInteraction = rememberTapInteractionSource()
+        val prevPressed by prevInteraction.collectIsPressedAsState()
+        val nextPressed by nextInteraction.collectIsPressedAsState()
+        val skipMotion = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+        val prevGrow by animateFloatAsState(if (prevPressed) 1f else 0f, skipMotion, label = "prev-width")
+        val nextGrow by animateFloatAsState(if (nextPressed) 1f else 0f, skipMotion, label = "next-width")
         Row(hide.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalIconButton(
-                onClick = { prevKick.kick(); vm.previous() }, enabled = snap.hasPrevious || progress.positionMs > 3_000, shapes = IconButtonDefaults.shapes(),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
-                ),
-                modifier = Modifier.size(width = 84.dp, height = 64.dp),
-            ) { SkipIcon(Symbols.SkipPrevious, "Previous", prevKick, size = 32.dp) }
+            Box(Modifier.size(width = 84.dp, height = 64.dp), contentAlignment = Alignment.CenterEnd) {
+                FilledTonalIconButton(
+                    onClick = { prevKick.kick(); vm.previous() }, enabled = snap.hasPrevious || progress.positionMs > 3_000, shapes = IconButtonDefaults.shapes(),
+                    interactionSource = prevInteraction,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
+                    ),
+                    modifier = Modifier.requiredSize(width = 84.dp * (1f + ButtonGroupDefaults.ExpandedRatio * prevGrow), height = 64.dp),
+                ) { SkipIcon(Symbols.SkipPrevious, "Previous", prevKick, size = 32.dp) }
+            }
             // The glyph is cut out of the white button (an offscreen layer lets it clear the container), so the cover shows through.
             PlayButton(snap.isPlaying, vm::togglePlayPause, buffering = snap.isBuffering)
-            FilledTonalIconButton(
-                onClick = { nextKick.kick(); vm.next() }, enabled = snap.hasNext, shapes = IconButtonDefaults.shapes(),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
-                ),
-                modifier = Modifier.size(width = 84.dp, height = 64.dp),
-            ) { SkipIcon(Symbols.SkipNext, "Next", nextKick, size = 32.dp) }
+            Box(Modifier.size(width = 84.dp, height = 64.dp), contentAlignment = Alignment.CenterStart) {
+                FilledTonalIconButton(
+                    onClick = { nextKick.kick(); vm.next() }, enabled = snap.hasNext, shapes = IconButtonDefaults.shapes(),
+                    interactionSource = nextInteraction,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = c.tonal, contentColor = c.text, disabledContainerColor = c.tonal, disabledContentColor = c.text.copy(alpha = 0.38f),
+                    ),
+                    modifier = Modifier.requiredSize(width = 84.dp * (1f + ButtonGroupDefaults.ExpandedRatio * nextGrow), height = 64.dp),
+                ) { SkipIcon(Symbols.SkipNext, "Next", nextKick, size = 32.dp) }
+            }
         }
 
         // Modes & overlays: Lyrics, Shuffle, Nightcore, Repeat, Queue
@@ -259,17 +277,16 @@ internal fun FavouriteToggle(favourite: Boolean, onToggle: () -> Unit) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LyricsOptions(hasTranslations: Boolean, hasPronunciations: Boolean, panel: PanelState, modifier: Modifier = Modifier) {
-    val c = LocalCoverColors.current
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         DisposableEffect(panel) { onDispose { panel.buttonRect = null } }
-        Box(Modifier.size(40.dp).clip(CircleShape).onGloballyPositioned { panel.buttonRect = it.boundsInRoot() }) {
-            FrostLayer(panel, Modifier.matchParentSize())
-            FilledTonalIconButton(
-                onClick = { open = true }, shapes = IconButtonDefaults.shapes(),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = c.tonal, contentColor = c.text),
-                modifier = Modifier.size(40.dp),
-            ) { SymbolIcon(Symbols.Translate, "Translations and pronunciation", size = 20.dp, tint = c.text) }
+        // Only the frost is clipped to a circle: clipping the button too would cut off its corner morph.
+        Box(Modifier.size(40.dp).onGloballyPositioned { panel.buttonRect = it.boundsInRoot() }) {
+            FrostLayer(panel, Modifier.matchParentSize().clip(CircleShape))
+            // Lit while either translations or pronunciations are showing; the tap opens the menu that switches them.
+            ModeToggle(panel.showTranslation && hasTranslations || panel.showPronunciation && hasPronunciations, { open = true }, Modifier.size(40.dp)) { blend, tint ->
+                SymbolIcon(Symbols.Translate, "Translations and pronunciation", size = 20.dp, tint = tint, blendMode = blend)
+            }
         }
         NowPlayingPopupTheme {
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -304,6 +321,7 @@ internal fun ModeToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, mo
         checked = checked,
         onCheckedChange = onCheckedChange,
         shapes = IconButtonDefaults.toggleableShapes(),
+        interactionSource = rememberTapInteractionSource(),
         colors = IconButtonDefaults.filledTonalIconToggleButtonColors(
             containerColor = c.tonal, contentColor = c.text, checkedContainerColor = c.accent, checkedContentColor = c.onAccent,
         ),

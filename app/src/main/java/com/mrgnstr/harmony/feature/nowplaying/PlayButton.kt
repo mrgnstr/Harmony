@@ -175,8 +175,13 @@ fun MorphingPlayButton(
     val shapeMotion = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // The rounded square only shows for a hold: a quick tap on the cookie would flash it for a frame or two, which looks like a glitch.
+    var held by remember { mutableStateOf(false) }
+    LaunchedEffect(pressed) {
+        if (pressed) { delay(150); held = true } else held = false
+    }
     val target = when {
-        pressed -> pressedProfile
+        held -> pressedProfile
         playing -> CookieProfile
         else -> CircleProfile
     }

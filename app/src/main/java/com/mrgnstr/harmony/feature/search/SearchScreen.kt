@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import com.mrgnstr.harmony.core.designsystem.motion.rememberTapInteractionSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -946,6 +947,7 @@ private fun TopResultCard(
                 }
                 FilledIconButton(
                     onClick = onPlayClick,
+                    interactionSource = rememberTapInteractionSource(),
                     shapes = IconButtonDefaults.shapes(),
                     modifier = Modifier.size(48.dp),
                 ) {
