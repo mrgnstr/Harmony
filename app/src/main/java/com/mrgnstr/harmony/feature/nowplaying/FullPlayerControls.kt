@@ -204,14 +204,15 @@ internal fun FullPlayerControls(
                 )
             }
             val nightcore by vm.nightcore.collectAsStateWithLifecycle()
+            val showNightcore by vm.showNightcore.collectAsStateWithLifecycle()
             var showSpeed by remember { mutableStateOf(false) }
-            Box {
+            if (showNightcore) Box {
                 val kick = rememberNightcoreKick()
                 ModeToggle(nightcore, { kick.play(); vm.toggleNightcore() }, Modifier.onLongPress { showSpeed = true }) { blend, tint ->
                     NightcoreIcon(blend, tint, weight = if (nightcore) 600 else 400, filled = nightcore, kick = kick)
                 }
             }
-            if (showSpeed) {
+            if (showNightcore && showSpeed) {
                 val speed by vm.nightcoreSpeed.collectAsStateWithLifecycle()
                 NightcoreSheet(speed, vm::setNightcoreSpeed, onDismiss = { showSpeed = false })
             }

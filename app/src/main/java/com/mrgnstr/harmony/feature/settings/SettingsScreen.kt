@@ -130,6 +130,9 @@ class SettingsViewModel @Inject constructor(
     val showAudioInfo: StateFlow<Boolean> = settings.showAudioInfo
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     fun setShowAudioInfo(on: Boolean) { viewModelScope.launch { settings.setShowAudioInfo(on) } }
+    val showNightcore: StateFlow<Boolean> = settings.showNightcore
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    fun setShowNightcore(on: Boolean) { viewModelScope.launch { settings.setShowNightcore(on) } }
     val alwaysDark: StateFlow<Boolean> = settings.nowPlayingAlwaysDark
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     fun setAlwaysDark(on: Boolean) { viewModelScope.launch { settings.setNowPlayingAlwaysDark(on) } }
@@ -244,6 +247,7 @@ fun SettingsRoute(
     val flowBackground by viewModel.flowBackground.collectAsStateWithLifecycle()
     val collapseBars by viewModel.collapseBars.collectAsStateWithLifecycle()
     val showAudioInfo by viewModel.showAudioInfo.collectAsStateWithLifecycle()
+    val showNightcore by viewModel.showNightcore.collectAsStateWithLifecycle()
     val libraryFilters by viewModel.libraryFilters.collectAsStateWithLifecycle()
     var showLocalFoldersSheet by remember { mutableStateOf(false) }
 
@@ -736,6 +740,12 @@ fun SettingsRoute(
                         subtitle = "The codec and quality pill above the seek bar",
                         checked = showAudioInfo,
                         onCheckedChange = viewModel::setShowAudioInfo,
+                    )
+                    SwitchSettingRow(
+                        title = "Nightcore Button in Now Playing",
+                        subtitle = "Plays songs faster with a higher pitch, like a sped-up record. Long-press the button to set the speed",
+                        checked = showNightcore,
+                        onCheckedChange = viewModel::setShowNightcore,
                     )
                     SwitchSettingRow(
                         title = "Classic Now Playing",

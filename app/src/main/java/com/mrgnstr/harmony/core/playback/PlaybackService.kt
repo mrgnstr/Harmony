@@ -185,7 +185,7 @@ class PlaybackService : MediaSessionService() {
         // Nightcore: speed and pitch are one factor, so Sonic resamples (speed / pitch = 1 means no time-stretching, just the
         // turntable effect). The setting is applied here, so the notification and Bluetooth controls play the same thing.
         scope.launch {
-            combine(settings.nightcore, settings.nightcoreSpeed) { on, speed -> if (on) speed else 1f }.collect { speed ->
+            combine(settings.nightcore, settings.nightcoreSpeed, settings.showNightcore) { on, speed, shown -> if (on && shown) speed else 1f }.collect { speed ->
                 player.playbackParameters = PlaybackParameters(speed, speed)
             }
         }

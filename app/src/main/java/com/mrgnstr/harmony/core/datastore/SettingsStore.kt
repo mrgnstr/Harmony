@@ -120,6 +120,13 @@ class SettingsStore @Inject constructor(@ApplicationContext private val context:
 
     suspend fun setShowAudioInfo(on: Boolean) { context.settingsDataStore.edit { it[showAudioInfoKey] = on } }
 
+    private val showNightcoreKey = booleanPreferencesKey("show_nightcore")
+
+    /** The nightcore button in full-screen Now Playing. Off by default; while it is off nightcore does not play either, so it cannot stay on unseen. */
+    val showNightcore: Flow<Boolean> = context.settingsDataStore.data.map { it[showNightcoreKey] ?: false }
+
+    suspend fun setShowNightcore(on: Boolean) { context.settingsDataStore.edit { it[showNightcoreKey] = on } }
+
     private val lyricsPriorityKey = stringPreferencesKey("lyrics_priority")
 
     /** Lyrics files beside a song or the lyrics in its tags first (files by default: they carry word timing and voices). */

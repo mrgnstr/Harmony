@@ -156,6 +156,8 @@ class NowPlayingViewModel @Inject constructor(
 
     val showAudioInfo: StateFlow<Boolean> = settings.showAudioInfo
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val showNightcore: StateFlow<Boolean> = settings.showNightcore
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val alwaysDark: StateFlow<Boolean> = settings.nowPlayingAlwaysDark
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
