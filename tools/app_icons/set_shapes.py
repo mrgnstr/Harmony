@@ -9,13 +9,18 @@ from lib import *  # noqa: F401,F403
 K = "#000000"
 INK = "a1.800"
 A, B = (55.3, 47.5), (52.7, 60.5)  # upper head (stem up), lower head (stem down)
-# The stems run off the shape and are clipped by it.
-STEMS = rrect(A[0] + 5.2, 10, 2.7, A[1] - 10, 1.35) + rrect(B[0] - 7.9, B[1], 2.7, 98 - B[1], 1.35)
+# The stems run off the shape and are clipped by it. Each stem's outer side lines up with its head's widest point
+# (HALF_W out along x); any further out and a sliver of stem shows past the head.
+HEAD_RX, HEAD_RY, HEAD_ROT = 7.7, 5.7, -22
+HALF_W = math.hypot(HEAD_RX * math.cos(math.radians(HEAD_ROT)), HEAD_RY * math.sin(math.radians(HEAD_ROT)))
+STEM_W = 2.7
+STEMS = (rrect(A[0] + HALF_W - STEM_W, 10, STEM_W, A[1] - 10, STEM_W / 2)
+         + rrect(B[0] - HALF_W, B[1], STEM_W, 98 - B[1], STEM_W / 2))
 HEADS = {A: "a1.600", B: "a3.500"}
 
 
 def head(c):
-    return ellipse(c[0], c[1], 7.7, 5.7, -22)
+    return ellipse(c[0], c[1], HEAD_RX, HEAD_RY, HEAD_ROT)
 
 
 def star(points, outer, inner, r, rot=-90):
