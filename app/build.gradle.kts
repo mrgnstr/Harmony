@@ -23,9 +23,22 @@ android {
     }
 
     signingConfigs {
-        // CI restores the shared debug keystore to a path it names here, so the signing key never depends on where the Android Gradle plugin
-        // looks for its default (the APK would silently be signed with a freshly generated key). Same alias and passwords as the default.
-        System.getenv("HARMONY_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }?.let { path -> getByName("debug") { storeFile = file(path) } }
+        // The release key lives outside the repo: harmonyRelease* in ~/.gradle/gradle.properties locally, HARMONY_RELEASE_* env
+        // vars in CI. Every published APK must carry it, or it will not install over the previous release.
+        fun secret(name: String) = (project.findProperty("harmonyRelease$name") as String?)
+            ?: System.getenv("HARMONY_RELEASE_" + name.replace(Regex("(?<=.)(?=[A-Z])"), "_").uppercase())
+        val storePath = secret("StoreFile")?.takeIf { it.isNotBlank() }
+        if (storePath != null) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = secret("StorePassword")
+                keyAlias = secret("KeyAlias")
+                keyPassword = secret("KeyPassword")
+            }
+        } else if (project.findProperty("requireReleaseKey") == "true") {
+            // The release workflow passes -PrequireReleaseKey=true: a published APK signed with a throwaway key would strand every install.
+            throw GradleException("No release key: set harmonyReleaseStoreFile or HARMONY_RELEASE_STORE_FILE")
+        }
     }
 
     buildTypes {
@@ -37,8 +50,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded personal app: sign release with the debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without the release key (a fresh checkout) the debug key signs it, so it still builds and installs for testing.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

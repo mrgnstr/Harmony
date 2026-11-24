@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -12,6 +13,8 @@ concurrency:
 
 jobs:
   build:
+    permissions:
+      contents: write   # creating the GitHub Release on a tag
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -27,27 +30,42 @@ jobs:
       - name: Accept SDK licenses (lets Gradle fetch the compile SDK)
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      # The release build is signed with the debug key. A stable key keeps the APK installable over the one on the phones;
-      # without the secret CI generates a fresh debug key and the APK will not update an existing install.
-      - name: Restore debug keystore
+      # Every published APK must be signed with the release key or it will not install over the previous one. Branch and PR
+      # builds fall back to a throwaway debug key without the secret (pull requests from forks get no secrets).
+      - name: Restore release keystore
         env:
-          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            mkdir -p ~/.android
-            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
-            # Named explicitly for the build (see signingConfigs in app/build.gradle.kts), not left to the plugin's default lookup.
-            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/debug.keystore"
-            echo "HARMONY_DEBUG_KEYSTORE=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "HARMONY_RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks"
+              echo "HARMONY_RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+              echo "HARMONY_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+              echo "HARMONY_RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
           else
-            echo "::warning::DEBUG_KEYSTORE_BASE64 not set; signing with a throwaway debug key"
+            echo "::warning::RELEASE_KEYSTORE_BASE64 not set; signing with a throwaway debug key"
+          fi
+
+      # A tag must name the version in the APK, so a release can't ship with a stale versionName.
+      - name: Check tag matches versionName
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -nE 's/^ *versionName = "(.*)"/\1/p' app/build.gradle.kts)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME but versionName is $version"; exit 1
           fi
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
 
       - name: Build release APK
-        run: ./gradlew :app:assembleRelease
+        # Tags refuse to build without the release key (see signingConfigs in app/build.gradle.kts).
+        run: ./gradlew :app:assembleRelease ${{ startsWith(github.ref, 'refs/tags/v') && '-PrequireReleaseKey=true' || '' }}
 
       # So a mismatch with the key on the phones shows up here, in the log, rather than as an install failure later.
       - name: Signing certificate
@@ -60,3 +78,12 @@ jobs:
           name: harmony-release
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="Harmony-${GITHUB_REF_NAME#v}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          gh release create "$GITHUB_REF_NAME" "$apk" --title "Harmony ${GITHUB_REF_NAME#v}" --generate-notes

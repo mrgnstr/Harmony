@@ -1,6 +1,6 @@
 #!/bin/bash
 # Frame stats (gfxinfo) for the Library tabs, Now Playing and tab switches on a connected phone: tools/bench.sh <adb serial>
-# Judge performance on the RELEASE build (./gradlew :app:assembleRelease, signed with the debug key): the debug build runs Compose
+# Judge performance on the RELEASE build (./gradlew :app:assembleRelease, signed with the release key): the debug build runs Compose
 # several times slower. Coordinates are for a 1080x2400 screen with a song loaded; a 'Janky' frame missed its deadline.
 D="adb -s ${1:?adb serial}"
 P=com.mrgnstr.harmony
